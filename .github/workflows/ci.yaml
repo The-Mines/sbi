@@ -31,7 +31,7 @@ jobs:
     strategy:
       matrix:
         app:
-          - name: spellcarver-python311
+          - name: python311
             dockerfile: ./containers/python311/Dockerfile
             context: ./containers/python311/
             env: dev
@@ -51,12 +51,8 @@ jobs:
           # Set the full image name
           IMAGE_NAME="ghcr.io/the-mines/spellcarver-base-images/${{ matrix.app.name }}"
 
-          # Generate tags based on event type
-          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == "refs/heads/main" ]]; then
-            echo "tags=${IMAGE_NAME}:latest,${IMAGE_NAME}:${{ matrix.app.env }}-${SHORT_SHA}" >> $GITHUB_OUTPUT
-          else
-            echo "tags=${IMAGE_NAME}:${{ matrix.app.env }}-${SHORT_SHA}" >> $GITHUB_OUTPUT
-          fi
+          # Always include latest tag along with the versioned tag
+          echo "tags=${IMAGE_NAME}:latest,${IMAGE_NAME}:${{ matrix.app.env }}-${SHORT_SHA}" >> $GITHUB_OUTPUT
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v2
