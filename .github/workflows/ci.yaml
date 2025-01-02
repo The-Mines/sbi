@@ -49,7 +49,7 @@ jobs:
           echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
 
           # Set the full image name
-          IMAGE_NAME="ghcr.io/the-mines/spellcarver-base-images/${{ matrix.app.name }}"
+          IMAGE_NAME="ghcr.io/the-mines/sbi/${{ matrix.app.name }}"
 
           # Always include latest tag along with the versioned tag
           echo "tags=${IMAGE_NAME}:latest,${IMAGE_NAME}:${{ matrix.app.env }}-${SHORT_SHA}" >> $GITHUB_OUTPUT
