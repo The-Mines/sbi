@@ -18,8 +18,8 @@ This container provides a minimal Python 3.11 development environment based on C
 Pull and run the container:
 
 ```bash
-docker pull your-registry/python311:latest
-docker run -it your-registry/python311:latest python
+docker pull ghcr.io/the-mines/spellcarver-base-images/spellcarver-python311:latest
+docker run -it ghcr.io/the-mines/spellcarver-base-images/spellcarver-python311:latest python
 ```
 
 ### Development Usage
@@ -27,7 +27,7 @@ docker run -it your-registry/python311:latest python
 1. Create a `Dockerfile` that extends this image:
 
 ```dockerfile
-FROM your-registry/python311:latest
+FROM ghcr.io/the-mines/spellcarver-base-images/spellcarver-python311:latest
 
 # Copy your application
 COPY . /app/
@@ -68,7 +68,7 @@ services:
 To install additional system packages, add them in the runtime stage:
 
 ```dockerfile
-FROM your-registry/python311:latest
+FROM ghcr.io/the-mines/spellcarver-base-images/spellcarver-python311:latest
 
 RUN apk add --no-cache package-name
 ```
@@ -79,12 +79,12 @@ To install Python packages, you can either:
 
 1. Mount a requirements.txt file:
 ```bash
-docker run -v $(pwd)/requirements.txt:/app/requirements.txt your-registry/python311:latest pip install -r requirements.txt
+docker run -v $(pwd)/requirements.txt:/app/requirements.txt ghcr.io/the-mines/spellcarver-base-images/spellcarver-python311:latest pip install -r requirements.txt
 ```
 
 2. Install directly using pip:
 ```bash
-docker run your-registry/python311:latest pip install package-name
+docker run ghcr.io/the-mines/spellcarver-base-images/spellcarver-python311:latest pip install package-name
 ```
 
 ## Development
