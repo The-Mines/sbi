@@ -14,6 +14,9 @@ on:
   push:
     paths:
       - 'containers/**'
+  schedule:
+    # Runs at 09:00 UTC (9am) every Friday
+    - cron: '0 9 * * 5'
   workflow_dispatch:
     inputs:
       branch:
