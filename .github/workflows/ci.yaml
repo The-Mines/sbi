@@ -75,7 +75,7 @@ jobs:
         with:
           context: ${{ matrix.app.context }}
           file: ${{ matrix.app.dockerfile }}
-          push: ${{ github.event_name == 'push' || github.event.inputs.deploy == 'true' }}
+          push: ${{ github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event.inputs.deploy == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha
