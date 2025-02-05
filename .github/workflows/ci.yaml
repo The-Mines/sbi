@@ -38,6 +38,10 @@ jobs:
             dockerfile: ./containers/python311/Dockerfile
             context: ./containers/python311/
             env: dev
+          - name: cassandra
+            dockerfile: ./containers/cassandra/Dockerfile
+            context: ./containers/cassandra/
+            env: dev
       fail-fast: false
 
     steps:
