@@ -9,6 +9,7 @@ RUN apt-get update && \
 
 # Copy backup script first
 COPY backup.py /tmp/backup.py
+COPY start.sh /start.sh
 
 # Install dependencies and clean up in a single layer
 RUN apt-get update && \
@@ -21,7 +22,8 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/* && \
     mkdir -p /etc/medusa && \
     mv /tmp/backup.py /etc/medusa/backup.py && \
-    chmod +x /etc/medusa/backup.py
+    chmod +x /etc/medusa/backup.py && \
+    chmod +x /start.sh
 
 # Create directory for backups
 VOLUME ["/etc/medusa", "/var/lib/cassandra/backups"]
@@ -30,8 +32,8 @@ VOLUME ["/etc/medusa", "/var/lib/cassandra/backups"]
 # HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
 #     CMD nodetool status || exit 1
 
-# # Set the backup script as the entrypoint
-# CMD ["python", "/etc/medusa/backup.py"]
+# Set the startup script as the entrypoint
+CMD ["/start.sh"]
 
 
 

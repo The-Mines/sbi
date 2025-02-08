@@ -12,10 +12,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Default backup settings
+DEFAULT_INTERVAL_HOURS = 12
+DEFAULT_BACKUP_TIMES = '00:00,12:00'
+
 # Backup configuration from environment variables
-BACKUP_MODE = os.getenv('BACKUP_MODE', 'interval')  # Changed default to 'interval'
-BACKUP_TIMES = os.getenv('BACKUP_TIMES', '00:00,12:00')  # Default times if using daily mode
-BACKUP_INTERVAL_HOURS = int(os.getenv('BACKUP_INTERVAL_HOURS', '12'))  # Changed default to 12 hours
+BACKUP_MODE = os.getenv('BACKUP_MODE', 'interval')  # Default to interval mode
+BACKUP_TIMES = os.getenv('BACKUP_TIMES', DEFAULT_BACKUP_TIMES)  # Default times if using daily mode
+try:
+    BACKUP_INTERVAL_HOURS = int(os.getenv('BACKUP_INTERVAL_HOURS', str(DEFAULT_INTERVAL_HOURS)))
+except ValueError:
+    logger.error(f"Invalid BACKUP_INTERVAL_HOURS value. Using default: {DEFAULT_INTERVAL_HOURS}")
+    BACKUP_INTERVAL_HOURS = DEFAULT_INTERVAL_HOURS
+
+# Ensure interval is never less than 1 hour
+if BACKUP_INTERVAL_HOURS < 1:
+    logger.error(f"Invalid interval hours. Using default: {DEFAULT_INTERVAL_HOURS}")
+    BACKUP_INTERVAL_HOURS = DEFAULT_INTERVAL_HOURS
 
 def check_medusa_config():
     """Verify medusa configuration exists"""
@@ -44,6 +57,7 @@ def run_medusa_backup():
 
         logger.info(f"Starting backup: {backup_name}")
 
+        # Run medusa backup command
         result = subprocess.run(
             ['medusa', 'backup', f'--backup-name={backup_name}'],
             capture_output=True,
@@ -51,13 +65,30 @@ def run_medusa_backup():
             check=True
         )
 
+        # Log the output from medusa
+        if result.stdout:
+            logger.info("Medusa Output:")
+            for line in result.stdout.splitlines():
+                logger.info(f"Medusa: {line}")
+
+        if result.stderr:
+            logger.warning("Medusa Warnings/Errors:")
+            for line in result.stderr.splitlines():
+                logger.warning(f"Medusa: {line}")
+
         logger.info(f"Backup completed successfully: {backup_name}")
-        logger.debug(result.stdout)
         return True
 
     except subprocess.CalledProcessError as e:
         logger.error(f"Backup failed: {e}")
-        logger.error(f"Error output: {e.stderr}")
+        if e.stdout:
+            logger.info("Medusa Output:")
+            for line in e.stdout.splitlines():
+                logger.info(f"Medusa: {line}")
+        if e.stderr:
+            logger.error("Medusa Error Output:")
+            for line in e.stderr.splitlines():
+                logger.error(f"Medusa: {line}")
         return False
     except Exception as e:
         logger.error(f"Unexpected error during backup: {str(e)}")
@@ -79,21 +110,16 @@ def main():
     logger.info(f"Backup mode: {BACKUP_MODE}")
 
     if BACKUP_MODE == 'interval':
-        if BACKUP_INTERVAL_HOURS < 1:
-            logger.error("Invalid interval hours. Using default: 12")
-            BACKUP_INTERVAL_HOURS = 12
         schedule_interval_backups()
-
     elif BACKUP_MODE == 'daily':
         if not validate_time_format(BACKUP_TIMES):
-            logger.error(f"Invalid backup times format: {BACKUP_TIMES}. Using default: 00:00,12:00")
-            backup_times = ["00:00", "12:00"]
+            logger.error(f"Invalid backup times format: {BACKUP_TIMES}. Using default: {DEFAULT_BACKUP_TIMES}")
+            backup_times = DEFAULT_BACKUP_TIMES.split(',')
         else:
             backup_times = BACKUP_TIMES.split(',')
         schedule_daily_backups(backup_times)
-
     else:
-        logger.error(f"Invalid backup mode: {BACKUP_MODE}. Using interval mode.")
+        logger.error(f"Invalid backup mode: {BACKUP_MODE}. Using interval mode with {DEFAULT_INTERVAL_HOURS} hour interval.")
         schedule_interval_backups()
 
     # Run first backup immediately
