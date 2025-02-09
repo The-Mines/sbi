@@ -57,12 +57,16 @@ def run_medusa_backup():
 
         logger.info(f"Starting backup: {backup_name}")
 
-        # Run medusa backup command
+        # Pass through all environment variables to the subprocess
+        env = os.environ.copy()
+
+        # Run medusa backup command with environment
         result = subprocess.run(
             ['medusa', 'backup', f'--backup-name={backup_name}'],
             capture_output=True,
             text=True,
-            check=True
+            check=True,
+            env=env  # Pass the environment variables
         )
 
         # Log the output from medusa

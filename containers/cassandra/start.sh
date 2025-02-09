@@ -1,22 +1,17 @@
 #!/bin/bash
+set -e
 
-# Function to start backup script with retry
-start_backup_script() {
-    while true; do
-        echo "Starting backup script..."
-        python3 /etc/medusa/backup.py || echo "Backup script exited with error, restarting in 60 seconds..."
-        sleep 60
-    done
-}
-
-# Start backup script only if ENABLE_BACKUPS is true
+#
+# 1. Start backup script in the background (only if enabled).
+#
 if [ "${ENABLE_BACKUPS,,}" = "true" ]; then
-    echo "Backups enabled, starting backup script..."
-    start_backup_script &
-    BACKUP_PID=$!
-else
-    echo "Backups disabled, skipping backup script"
+    echo "Backups enabled; launching backup.py in background..."
+    python3 /etc/medusa/backup.py &
 fi
 
-# Start Cassandra in the foreground
-exec cassandra -f
+#
+# 2. Chain to the real Cassandra entrypoint script.
+#    The official Cassandra image’s /docker-entrypoint.sh sets up the environment correctly
+#    before calling `exec` on Cassandra. So we just pass in whatever arguments we got.
+#
+exec /docker-entrypoint.sh "$@"

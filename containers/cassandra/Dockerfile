@@ -1,41 +1,35 @@
 FROM cassandra:5.0.1
 
-# Install Python and create symlinks first
+# Switch to root if you need to install packages
+USER root
+
 RUN apt-get update && \
-    apt-get install -y python3 python3-distutils && \
+    apt-get install -y python3 python3-distutils python3-pip python3-setuptools python3-wheel && \
     ln -sf /usr/bin/python3 /usr/bin/python && \
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-
-# Copy backup script first
-COPY backup.py /tmp/backup.py
-COPY start.sh /start.sh
-
-# Install dependencies and clean up in a single layer
-RUN apt-get update && \
-    apt-get install -y \
-    python3-pip \
-    python3-setuptools \
-    python3-wheel && \
-    pip install --no-cache-dir cassandra-medusa schedule && \
-    apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
-    mkdir -p /etc/medusa && \
-    mv /tmp/backup.py /etc/medusa/backup.py && \
-    chmod +x /etc/medusa/backup.py && \
-    chmod +x /start.sh
+    pip install --no-cache-dir cassandra-medusa schedule
 
-# Create directory for backups
+# Make medusa directory & copy in backup script
+RUN mkdir -p /etc/medusa
+COPY backup.py /etc/medusa/backup.py
+
+# Copy in your custom start script
+COPY start.sh /usr/local/bin/start.sh
+
+# Ensure both scripts are executable
+RUN chmod +x /etc/medusa/backup.py && \
+    chmod +x /usr/local/bin/start.sh
+
+# (Optionally) declare volumes
 VOLUME ["/etc/medusa", "/var/lib/cassandra/backups"]
 
-# # Add a healthcheck
-# HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-#     CMD nodetool status || exit 1
+# Switch back to Cassandra user if desired
+USER cassandra
 
-# Set the startup script as the entrypoint
-CMD ["/start.sh"]
+# Here we override the entrypoint so that we can run our wrapper script
+ENTRYPOINT ["/usr/local/bin/start.sh"]
 
-
-
-
-
+# The official Cassandra image sets CMD to ["cassandra", "-f"] by default.
+# We'll preserve that, but it now goes through our script -> official entrypoint -> cassandra
+CMD ["cassandra", "-f"]
