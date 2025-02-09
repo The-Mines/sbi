@@ -3,12 +3,20 @@ FROM cassandra:5.0.1
 # Switch to root if you need to install packages
 USER root
 
+# Install Python and dependencies
 RUN apt-get update && \
-    apt-get install -y python3 python3-distutils python3-pip python3-setuptools python3-wheel && \
-    ln -sf /usr/bin/python3 /usr/bin/python && \
+    apt-get install -y \
+    python3 \
+    python3-dev \
+    python3-pip \
+    python3-setuptools \
+    python3-venv && \
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/* && \
-    pip install --no-cache-dir cassandra-medusa schedule
+    rm -rf /var/lib/apt/lists/*
+
+# Create Python symlinks and install Medusa
+RUN ln -sf /usr/bin/python3 /usr/bin/python && \
+    pip3 install --no-cache-dir cassandra-medusa schedule
 
 # Make medusa directory & copy in backup script
 RUN mkdir -p /etc/medusa
