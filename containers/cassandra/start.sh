@@ -14,4 +14,4 @@ fi
 #    The official Cassandra image’s /docker-entrypoint.sh sets up the environment correctly
 #    before calling `exec` on Cassandra. So we just pass in whatever arguments we got.
 #
-exec /docker-entrypoint.sh "$@"
+exec docker-entrypoint.sh "$@"
