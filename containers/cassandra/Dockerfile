@@ -10,15 +10,12 @@ RUN apt-get update && \
     python3-dev \
     python3-pip \
     python3-setuptools \
-    python3-venv 
-    # removing cleanup
-    # && \
-    # apt-get clean && \
-    # rm -rf /var/lib/apt/lists/*
+    python3-venv && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Create Python symlinks and install Medusa
-RUN ln -sf /usr/bin/python3 /usr/bin/python && \
-    pip3 install --no-cache-dir cassandra-medusa schedule
+RUN pip3 install --no-cache-dir cassandra-medusa schedule
 
 # Make medusa directory & copy in backup script
 RUN mkdir -p /etc/medusa
