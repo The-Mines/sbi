@@ -29,8 +29,8 @@ RUN chmod +x /etc/medusa/backup.py && \
 # (Optionally) declare volumes
 VOLUME ["/etc/medusa", "/var/lib/cassandra/backups"]
 
-# Switch back to Cassandra user if desired
-USER cassandra
+# # Switch back to Cassandra user if desired
+# USER cassandra
 
 # Here we override the entrypoint so that we can run our wrapper script
 ENTRYPOINT ["/usr/local/bin/start.sh"]
