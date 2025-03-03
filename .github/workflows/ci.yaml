@@ -7,6 +7,7 @@ permissions:
   statuses: write
   packages: write
   id-token: write # Needed for keyless signing
+  security-events: write
 
 on:
   pull_request:
