@@ -1,0 +1,48 @@
+# Dockerfile for Node.js 22 LTS based on Wolfi
+# This builds a minimal, secure container image for running Node.js 22 LTS applications
+
+FROM cgr.dev/chainguard/wolfi-base:latest
+
+# Start as root user for installation and setup
+USER root
+
+# Set up environment variables
+ENV NODE_VERSION=22
+ENV NODE_PORT=3000
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false
+ENV PATH=/usr/sbin:/sbin:/usr/bin:/bin
+
+# Install Node.js 22 LTS and required packages
+# Deliberately avoid busybox and npm to minimize attack surface
+RUN apk update && \
+    apk add --no-cache \
+    nodejs-22 \
+    dumb-init \
+    nghttp2
+
+# Create a non-root user and group
+# Let the system choose available IDs instead of hardcoding
+RUN addgroup -S node && \
+    adduser -S -G node -h /home/node node
+
+# Create application directory and set permissions
+RUN mkdir -p /app && \
+    chown -R node:node /app && \
+    chmod 755 /app
+
+# Set working directory
+WORKDIR /app
+
+# Switch to non-root user
+USER node
+
+# Set entrypoint and default command
+ENTRYPOINT ["/usr/bin/dumb-init", "--"]
+CMD ["/usr/bin/node", "--help"]
+
+# Define metadata
+LABEL org.opencontainers.image.title="Node.js 22 LTS"
+LABEL org.opencontainers.image.description="Minimal container image for running Node.js 22 LTS apps"
+LABEL org.opencontainers.image.vendor="The Mines"
+LABEL org.opencontainers.image.source="https://github.com/The-Mines/sbi"
+LABEL org.opencontainers.image.documentation="https://github.com/The-Mines/sbi/blob/main/containers/node/node22/README.md"

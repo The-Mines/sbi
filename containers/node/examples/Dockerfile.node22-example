@@ -1,0 +1,27 @@
+# Example Dockerfile for using Node.js 22 LTS image
+# This demonstrates a multi-stage build approach for Node.js applications
+
+# Build stage - Update image reference to include repository
+FROM ghcr.io/the-mines/sbi/node22-dev AS builder
+WORKDIR /build
+COPY package*.json ./
+
+# Install dependencies
+RUN npm ci --omit=dev
+
+# Copy application code
+COPY . .
+
+# Run any build steps (uncomment if needed)
+# RUN npm run build
+
+# Production stage - Update image reference to include repository
+FROM ghcr.io/the-mines/sbi/node22
+WORKDIR /app
+
+# Copy built application from builder stage
+COPY --from=builder /build .
+
+# Set command to run the application
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["node", "server.js"]
