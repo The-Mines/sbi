@@ -99,6 +99,33 @@ jobs:
             org.opencontainers.image.description=Spellcarver Base Image for ${{ matrix.name }}
             org.opencontainers.image.source=https://github.com/The-Mines/sbi
 
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: ${{ matrix.context }}
+          format: 'table'
+          output: 'trivy-results.txt'
+          severity: 'CRITICAL,HIGH'
+        if: env.PUSH_CONDITION == 'true'
+
+      - name: Upload Trivy scan results as an artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-results-${{ matrix.name }}
+          path: trivy-results.txt
+        if: env.PUSH_CONDITION == 'true'
+
+      - name: Extract Trivy summary for metadata
+        run: |
+          if [ -f "trivy-results.txt" ]; then
+            SUMMARY=$(grep -E 'Total: [0-9]+' trivy-results.txt | head -1 || echo 'No vulnerabilities detected')
+            echo "TRIVY_SUMMARY=${SUMMARY}" >> $GITHUB_ENV
+          else
+            echo "TRIVY_SUMMARY=Scan not performed" >> $GITHUB_ENV
+          fi
+        if: env.PUSH_CONDITION == 'true'
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
@@ -109,24 +136,11 @@ jobs:
           platforms: ${{ env.PLATFORMS }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,scope=${{ matrix.name }},mode=max
-          labels: ${{ steps.meta.outputs.labels }}
+          labels: |
+            ${{ steps.meta.outputs.labels }}
+            org.opencontainers.image.security.trivy-summary=${{ env.TRIVY_SUMMARY }}
           provenance: mode=max
           sbom: true
-
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.name }}:${{ matrix.env }}-${{ needs.prepare.outputs.short_sha }}
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-          severity: 'CRITICAL,HIGH'
-        if: env.PUSH_CONDITION == 'true'
-
-      - name: Upload Trivy scan results
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: 'trivy-results.sarif'
-        if: env.PUSH_CONDITION == 'true'
 
       - name: Notify on failure
         if: failure()
