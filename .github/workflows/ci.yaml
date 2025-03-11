@@ -192,7 +192,7 @@ jobs:
         id: slack-message
         run: |
           # Get the build matrix
-          MATRIX=''
+          MATRIX='${{ needs.get-matrix.outputs.matrix }}'
 
           # Format date and time
           BUILD_DATE=$(date '+%Y-%m-%d %H:%M:%S UTC')
@@ -202,41 +202,41 @@ jobs:
 
           # Start building the Slack message
           cat << EOF > slack_message.json
-          {
-            "blocks": [
-              {
-                "type": "header",
-                "text": {
-                  "type": "plain_text",
-                  "text": "📦 Spellcarver Base Images Build Summary",
-                  "emoji": true
-                }
-              },
-              {
-                "type": "section",
-                "text": {
-                  "type": "mrkdwn",
-                  "text": "*Repository:* ${GITHUB_REPOSITORY}\n*Branch:* ${GITHUB_REF_NAME}\n*Commit:* ${GITHUB_SHA}\n*Build Date:* ${BUILD_DATE}"
-                }
-              },
-              {
-                "type": "divider"
-              },
-              {
-                "type": "section",
-                "text": {
-                  "type": "mrkdwn",
-                  "text": "*Build Results:*"
-                }
-              }
-            ]
-          }
-          EOF
+{
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "📦 Spellcarver Base Images Build Summary",
+        "emoji": true
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Repository:* ${GITHUB_REPOSITORY}\n*Branch:* ${GITHUB_REF_NAME}\n*Commit:* ${GITHUB_SHA}\n*Build Date:* ${BUILD_DATE}"
+      }
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Build Results:*"
+      }
+    }
+  ]
+}
+EOF
 
           # Process each image in the matrix and add its status
           echo "$MATRIX" | jq -c '.include[]' | while read -r item; do
             NAME=$(echo "$item" | jq -r '.name')
-            STATUS='success'
+            STATUS='${{ needs.build-images.result }}'
 
             # Set the status emoji based on build result
             if [ "$STATUS" == "success" ]; then
@@ -251,15 +251,15 @@ jobs:
 
             # Create a block for this image
             BLOCK=$(cat << EOF
-            {
-              "type": "section",
-              "text": {
-                "type": "mrkdwn",
-                "text": "${STATUS_EMOJI} *${NAME}*: ${STATUS}"
-              }
-            }
-            EOF
-            )
+{
+  "type": "section",
+  "text": {
+    "type": "mrkdwn",
+    "text": "${STATUS_EMOJI} *${NAME}*: ${STATUS}"
+  }
+}
+EOF
+)
 
             # Add the block to the message file
             TMP_FILE=$(mktemp)
@@ -269,15 +269,15 @@ jobs:
 
           # Add workflow run link
           WORKFLOW_LINK_BLOCK=$(cat << EOF
-          {
-            "type": "section",
-            "text": {
-              "type": "mrkdwn",
-              "text": "*<https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}|View Workflow Run>*"
-            }
-          }
-          EOF
-          )
+{
+  "type": "section",
+  "text": {
+    "type": "mrkdwn",
+    "text": "*<https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}|View Workflow Run>*"
+  }
+}
+EOF
+)
 
           TMP_FILE=$(mktemp)
           jq --argjson block "$WORKFLOW_LINK_BLOCK" '.blocks += [$block]' slack_message.json > "$TMP_FILE"
