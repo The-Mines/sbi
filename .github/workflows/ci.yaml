@@ -242,8 +242,10 @@ jobs:
       - name: Send Slack notification
         uses: slackapi/slack-github-action@v1.25.0
         with:
+          # Simplify the payload format with required text field
           payload: |
             {
+              "text": "📦 Spellcarver Base Images Build Summary",
               "blocks": [
                 {
                   "type": "header",
