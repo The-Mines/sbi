@@ -223,10 +223,11 @@ jobs:
         id: generate-status
         run: |
           # Extract build statuses to create status summary
-          echo "build_date=$(date '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
+          BUILD_DATE=$(date '+%Y-%m-%d %H:%M:%S UTC')
+          echo "build_date=${BUILD_DATE}" >> $GITHUB_OUTPUT
 
-          # Create a formatted status list for Slack
-          echo "status_list<<EOF" >> $GITHUB_OUTPUT
+          # Generate status entries for each image
+          STATUS_ENTRIES=""
           MATRIX='${{ needs.prepare.outputs.matrix }}'
           echo "$MATRIX" | jq -c '.include[]' | while read -r item; do
             NAME=$(echo "$item" | jq -r '.name')
@@ -237,71 +238,84 @@ jobs:
             fi
 
             if [ "$STATUS" == "success" ]; then
-              echo "• ✅ *${NAME}*: ${STATUS}" >> $GITHUB_OUTPUT
+              EMOJI="✅"
             elif [ "$STATUS" == "failure" ]; then
-              echo "• ❌ *${NAME}*: ${STATUS}" >> $GITHUB_OUTPUT
+              EMOJI="❌"
             elif [ "$STATUS" == "cancelled" ]; then
-              echo "• ⚠️ *${NAME}*: ${STATUS}" >> $GITHUB_OUTPUT
+              EMOJI="⚠️"
             else
-              echo "• ❓ *${NAME}*: ${STATUS}" >> $GITHUB_OUTPUT
+              EMOJI="❓"
+            fi
+
+            if [ -z "$STATUS_ENTRIES" ]; then
+              STATUS_ENTRIES="${EMOJI} *${NAME}*: ${STATUS}"
+            else
+              STATUS_ENTRIES="${STATUS_ENTRIES}\n${EMOJI} *${NAME}*: ${STATUS}"
             fi
           done
-          echo "EOF" >> $GITHUB_OUTPUT
+
+          echo "status_entries=${STATUS_ENTRIES}" >> $GITHUB_OUTPUT
+
+      - name: Create and validate Slack payload
+        id: create-payload
+        run: |
+          cat > slack_payload.json << EOF
+          {
+            "text": "📦 Spellcarver Base Images Build Summary",
+            "blocks": [
+              {
+                "type": "header",
+                "text": {
+                  "type": "plain_text",
+                  "text": "📦 Spellcarver Base Images Build Summary",
+                  "emoji": true
+                }
+              },
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "*Repository:* ${{ github.repository }}\n*Branch:* ${{ github.ref_name }}\n*Commit:* ${{ github.sha }}\n*Build Date:* ${{ steps.generate-status.outputs.build_date }}"
+                }
+              },
+              {
+                "type": "divider"
+              },
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "*Build Results:*\n${{ steps.generate-status.outputs.status_entries }}"
+                }
+              },
+              {
+                "type": "actions",
+                "elements": [
+                  {
+                    "type": "button",
+                    "text": {
+                      "type": "plain_text",
+                      "text": "View Workflow Run",
+                      "emoji": true
+                    },
+                    "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                  }
+                ]
+              }
+            ]
+          }
+          EOF
+
+          # Validate the JSON
+          jq empty slack_payload.json || { echo "Invalid JSON"; exit 1; }
+          echo "JSON payload validated successfully"
+
+          # Set output path for the valid JSON file
+          echo "payload_path=slack_payload.json" >> $GITHUB_OUTPUT
 
       - name: Send Slack notification
         uses: slackapi/slack-github-action@v1.25.0
         with:
-          payload: |
-            {
-              "text": "📦 Spellcarver Base Images Build Summary",
-              "blocks": [
-                {
-                  "type": "header",
-                  "text": {
-                    "type": "plain_text",
-                    "text": "📦 Spellcarver Base Images Build Summary",
-                    "emoji": true
-                  }
-                },
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "*Repository:* ${{ github.repository }}\n*Branch:* ${{ github.ref_name }}\n*Commit:* ${{ github.sha }}\n*Build Date:* ${{ steps.generate-status.outputs.build_date }}"
-                  }
-                },
-                {
-                  "type": "divider"
-                },
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "*Build Results:*"
-                  }
-                },
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "${{ steps.generate-status.outputs.status_list }}"
-                  }
-                },
-                {
-                  "type": "actions",
-                  "elements": [
-                    {
-                      "type": "button",
-                      "text": {
-                        "type": "plain_text",
-                        "text": "View Workflow Run",
-                        "emoji": true
-                      },
-                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-                    }
-                  ]
-                }
-              ]
-            }
+          payload-file-path: ${{ steps.create-payload.outputs.payload_path }}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
