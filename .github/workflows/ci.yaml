@@ -213,23 +213,12 @@ jobs:
           pattern: build-status-*
           merge-multiple: true
 
-      - name: Prepare Slack message
-        id: slack-message
+      - name: Generate build status details
+        id: generate-status
         run: |
-          BUILD_DATE=$(date '+%Y-%m-%d %H:%M:%S UTC')
+          # Extract build statuses to create status summary
+          STATUS_TEXT=""
           MATRIX='${{ needs.prepare.outputs.matrix }}'
-
-          cat << EOF > slack_message.json
-          {
-            "blocks": [
-              {"type": "header","text": {"type": "plain_text","text": "📦 Spellcarver Base Images Build Summary","emoji": true}},
-              {"type": "section","text": {"type": "mrkdwn","text": "*Repository:* ${GITHUB_REPOSITORY}\n*Branch:* ${GITHUB_REF_NAME}\n*Commit:* ${GITHUB_SHA}\n*Build Date:* ${BUILD_DATE}"}},
-              {"type": "divider"},
-              {"type": "section","text": {"type": "mrkdwn","text": "*Build Results:*"}}
-            ]
-          }
-          EOF
-
           echo "$MATRIX" | jq -c '.include[]' | while read -r item; do
             NAME=$(echo "$item" | jq -r '.name')
             if [ -f "build-status-artifacts/${NAME}.status" ]; then
@@ -243,35 +232,59 @@ jobs:
             elif [ "$STATUS" == "cancelled" ]; then STATUS_EMOJI="⚠️"
             else STATUS_EMOJI="❓"; fi
 
-            BLOCK=$(cat << EOF
-            {"type": "section","text": {"type": "mrkdwn","text": "${STATUS_EMOJI} *${NAME}*: ${STATUS}"}}
-            EOF
-            )
-
-            TMP_FILE=$(mktemp)
-            jq --argjson block "$BLOCK" '.blocks += [$block]' slack_message.json > "$TMP_FILE"
-            mv "$TMP_FILE" slack_message.json
+            STATUS_TEXT="${STATUS_TEXT}${STATUS_EMOJI} *${NAME}*: ${STATUS}\n"
           done
-
-          WORKFLOW_LINK_BLOCK=$(cat << EOF
-          {"type": "section","text": {"type": "mrkdwn","text": "*<https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}|View Workflow Run>*"}}
-          EOF
-          )
-
-          TMP_FILE=$(mktemp)
-          jq --argjson block "$WORKFLOW_LINK_BLOCK" '.blocks += [$block]' slack_message.json > "$TMP_FILE"
-          mv "$TMP_FILE" slack_message.json
-
-          SLACK_MESSAGE=$(cat slack_message.json)
-          SLACK_MESSAGE="${SLACK_MESSAGE//'%'/'%25'}"
-          SLACK_MESSAGE="${SLACK_MESSAGE//$'\n'/'%0A'}"
-          SLACK_MESSAGE="${SLACK_MESSAGE//$'\r'/'%0D'}"
-
-          echo "payload=${SLACK_MESSAGE}" >> $GITHUB_OUTPUT
+          echo "status_text<<EOF" >> $GITHUB_OUTPUT
+          echo "$STATUS_TEXT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          echo "build_date=$(date '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
 
       - name: Send Slack notification
         uses: slackapi/slack-github-action@v1.25.0
         with:
-          payload: ${{ steps.slack-message.outputs.payload }}
+          payload: |
+            {
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "📦 Spellcarver Base Images Build Summary",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Repository:* ${{ github.repository }}\n*Branch:* ${{ github.ref_name }}\n*Commit:* ${{ github.sha }}\n*Build Date:* ${{ steps.generate-status.outputs.build_date }}"
+                  }
+                },
+                {
+                  "type": "divider"
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Build Results:*\n${{ steps.generate-status.outputs.status_text }}"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Workflow Run",
+                        "emoji": true
+                      },
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]
+            }
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
