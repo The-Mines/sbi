@@ -192,7 +192,7 @@ jobs:
         id: slack-message
         run: |
           # Get the build matrix
-          MATRIX='${{ needs.prepare.outputs.matrix }}'
+          MATRIX=''
 
           # Format date and time
           BUILD_DATE=$(date '+%Y-%m-%d %H:%M:%S UTC')
@@ -236,7 +236,7 @@ jobs:
           # Process each image in the matrix and add its status
           echo "$MATRIX" | jq -c '.include[]' | while read -r item; do
             NAME=$(echo "$item" | jq -r '.name')
-            STATUS='${{ needs.build-images.result }}'
+            STATUS='success'
 
             # Set the status emoji based on build result
             if [ "$STATUS" == "success" ]; then
