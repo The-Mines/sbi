@@ -54,7 +54,7 @@ jobs:
       - name: Set build matrix
         id: set-matrix
         run: |
-          echo 'matrix={"include":[{"name":"python311","dockerfile":"./containers/python311/Dockerfile","context":"./containers/python311/","env":"dev"},{"name":"cassandra","dockerfile":"./containers/cassandra/Dockerfile","context":"./containers/cassandra/","env":"dev"},{"name":"node22","dockerfile":"./containers/node/node22/Dockerfile.node22","context":"./containers/node/node22/","env":"latest"},{"name":"node22-dev","dockerfile":"./containers/node/node22/Dockerfile.node22-dev","context":"./containers/node/node22/","env":"dev"}]}' >> $GITHUB_OUTPUT
+          echo 'matrix={"include":[{"name":"python311","dockerfile":"./containers/python311/Dockerfile","context":"./containers/python311/","env":"dev"},{"name":"cassandra","dockerfile":"./containers/cassandra/Dockerfile","context":"./containers/cassandra/","env":"dev"},{"name":"node22","dockerfile":"./containers/node/node22/Dockerfile.node22","context":"./containers/node/node22/","env":"latest"},{"name":"node22-dev","dockerfile":"./containers/node/node22/Dockerfile.node22-dev","context":"./containers/node/node22/","env":"dev"},{"name":"node23","dockerfile":"./containers/node/node23/Dockerfile.node23","context":"./containers/node/node23/","env":"latest"},{"name":"node23-dev","dockerfile":"./containers/node/node23/Dockerfile.node23-dev","context":"./containers/node/node23/","env":"dev"}]}' >> $GITHUB_OUTPUT
 
   build-images:
     needs: prepare
@@ -174,3 +174,126 @@ jobs:
             name=$(echo "$item" | jq -r '.name')
             echo "| $name | ${{ needs.build-images.result }} |" >> $GITHUB_STEP_SUMMARY
           done
+
+  slack-notification:
+    needs: [build-images, summary]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get build matrix info
+        id: get-matrix
+        run: |
+          echo "matrix=$(echo '${{ needs.prepare.outputs.matrix }}')" >> $GITHUB_OUTPUT
+
+      - name: Prepare Slack message
+        id: slack-message
+        run: |
+          # Get the build matrix
+          MATRIX='${{ needs.prepare.outputs.matrix }}'
+
+          # Format date and time
+          BUILD_DATE=$(date '+%Y-%m-%d %H:%M:%S UTC')
+
+          # Get the repository name
+          REPO="${GITHUB_REPOSITORY#*/}"
+
+          # Start building the Slack message
+          cat << EOF > slack_message.json
+          {
+            "blocks": [
+              {
+                "type": "header",
+                "text": {
+                  "type": "plain_text",
+                  "text": "📦 Spellcarver Base Images Build Summary",
+                  "emoji": true
+                }
+              },
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "*Repository:* ${GITHUB_REPOSITORY}\n*Branch:* ${GITHUB_REF_NAME}\n*Commit:* ${GITHUB_SHA}\n*Build Date:* ${BUILD_DATE}"
+                }
+              },
+              {
+                "type": "divider"
+              },
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "*Build Results:*"
+                }
+              }
+            ]
+          }
+          EOF
+
+          # Process each image in the matrix and add its status
+          echo "$MATRIX" | jq -c '.include[]' | while read -r item; do
+            NAME=$(echo "$item" | jq -r '.name')
+            STATUS='${{ needs.build-images.result }}'
+
+            # Set the status emoji based on build result
+            if [ "$STATUS" == "success" ]; then
+              STATUS_EMOJI="✅"
+            elif [ "$STATUS" == "failure" ]; then
+              STATUS_EMOJI="❌"
+            elif [ "$STATUS" == "cancelled" ]; then
+              STATUS_EMOJI="⚠️"
+            else
+              STATUS_EMOJI="❓"
+            fi
+
+            # Create a block for this image
+            BLOCK=$(cat << EOF
+            {
+              "type": "section",
+              "text": {
+                "type": "mrkdwn",
+                "text": "${STATUS_EMOJI} *${NAME}*: ${STATUS}"
+              }
+            }
+            EOF
+            )
+
+            # Add the block to the message file
+            TMP_FILE=$(mktemp)
+            jq --argjson block "$BLOCK" '.blocks += [$block]' slack_message.json > "$TMP_FILE"
+            mv "$TMP_FILE" slack_message.json
+          done
+
+          # Add workflow run link
+          WORKFLOW_LINK_BLOCK=$(cat << EOF
+          {
+            "type": "section",
+            "text": {
+              "type": "mrkdwn",
+              "text": "*<https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}|View Workflow Run>*"
+            }
+          }
+          EOF
+          )
+
+          TMP_FILE=$(mktemp)
+          jq --argjson block "$WORKFLOW_LINK_BLOCK" '.blocks += [$block]' slack_message.json > "$TMP_FILE"
+          mv "$TMP_FILE" slack_message.json
+
+          # Prepare the message for GitHub output
+          SLACK_MESSAGE=$(cat slack_message.json)
+          SLACK_MESSAGE="${SLACK_MESSAGE//'%'/'%25'}"
+          SLACK_MESSAGE="${SLACK_MESSAGE//$'\n'/'%0A'}"
+          SLACK_MESSAGE="${SLACK_MESSAGE//$'\r'/'%0D'}"
+
+          echo "payload=${SLACK_MESSAGE}" >> $GITHUB_OUTPUT
+
+      - name: Send Slack notification
+        uses: slackapi/slack-github-action@v1.25.0
+        with:
+          payload: ${{ steps.slack-message.outputs.payload }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
