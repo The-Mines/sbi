@@ -176,6 +176,13 @@ jobs:
     runs-on: ubuntu-latest
     if: always()
     steps:
+      - name: Download build status artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: build-status-artifacts
+          pattern: build-status-*
+          merge-multiple: true
+
       - name: Create build summary
         run: |
           echo "## Spellcarver Base Images Build Summary" >> $GITHUB_STEP_SUMMARY
@@ -185,10 +192,16 @@ jobs:
           echo "### Image Status" >> $GITHUB_STEP_SUMMARY
           echo "| Image | Status |" >> $GITHUB_STEP_SUMMARY
           echo "| ----- | ------ |" >> $GITHUB_STEP_SUMMARY
-          matrix='${{ needs.prepare.outputs.matrix }}'
-          echo "$matrix" | jq -c '.include[]' | while read -r item; do
-            name=$(echo "$item" | jq -r '.name')
-            echo "| $name | ${{ needs.build-images.result }} |" >> $GITHUB_STEP_SUMMARY
+
+          MATRIX='${{ needs.prepare.outputs.matrix }}'
+          echo "$MATRIX" | jq -c '.include[]' | while read -r item; do
+            NAME=$(echo "$item" | jq -r '.name')
+            if [ -f "build-status-artifacts/${NAME}.status" ]; then
+              STATUS=$(cat "build-status-artifacts/${NAME}.status")
+            else
+              STATUS="unknown"
+            fi
+            echo "| $NAME | $STATUS |" >> $GITHUB_STEP_SUMMARY
           done
 
   slack-notification:
@@ -210,7 +223,10 @@ jobs:
         id: generate-status
         run: |
           # Extract build statuses to create status summary
-          STATUS_TEXT=""
+          echo "build_date=$(date '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
+
+          # Create a formatted status list for Slack
+          echo "status_list<<EOF" >> $GITHUB_OUTPUT
           MATRIX='${{ needs.prepare.outputs.matrix }}'
           echo "$MATRIX" | jq -c '.include[]' | while read -r item; do
             NAME=$(echo "$item" | jq -r '.name')
@@ -220,22 +236,21 @@ jobs:
               STATUS="unknown"
             fi
 
-            if [ "$STATUS" == "success" ]; then STATUS_EMOJI="✅"
-            elif [ "$STATUS" == "failure" ]; then STATUS_EMOJI="❌"
-            elif [ "$STATUS" == "cancelled" ]; then STATUS_EMOJI="⚠️"
-            else STATUS_EMOJI="❓"; fi
-
-            STATUS_TEXT="${STATUS_TEXT}${STATUS_EMOJI} *${NAME}*: ${STATUS}\n"
+            if [ "$STATUS" == "success" ]; then
+              echo "• ✅ *${NAME}*: ${STATUS}" >> $GITHUB_OUTPUT
+            elif [ "$STATUS" == "failure" ]; then
+              echo "• ❌ *${NAME}*: ${STATUS}" >> $GITHUB_OUTPUT
+            elif [ "$STATUS" == "cancelled" ]; then
+              echo "• ⚠️ *${NAME}*: ${STATUS}" >> $GITHUB_OUTPUT
+            else
+              echo "• ❓ *${NAME}*: ${STATUS}" >> $GITHUB_OUTPUT
+            fi
           done
-          echo "status_text<<EOF" >> $GITHUB_OUTPUT
-          echo "$STATUS_TEXT" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
-          echo "build_date=$(date '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
 
       - name: Send Slack notification
         uses: slackapi/slack-github-action@v1.25.0
         with:
-          # Simplify the payload format with required text field
           payload: |
             {
               "text": "📦 Spellcarver Base Images Build Summary",
@@ -262,7 +277,14 @@ jobs:
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": "*Build Results:*\n${{ steps.generate-status.outputs.status_text }}"
+                    "text": "*Build Results:*"
+                  }
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "${{ steps.generate-status.outputs.status_list }}"
                   }
                 },
                 {
