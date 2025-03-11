@@ -248,12 +248,13 @@ jobs:
           BUILD_STATUS=$(cat build_status.txt | jq -Rs '.')
           BUILD_DATE=$(date '+%Y-%m-%d %H:%M:%S UTC' | jq -Rs '.')
           REPO_INFO=$(echo "*Repository:* ${{ github.repository }}\n*Branch:* ${{ github.ref_name }}\n*Commit:* ${{ github.sha }}\n*Build Date:* $(date '+%Y-%m-%d %H:%M:%S UTC')" | jq -Rs '.')
+          BUILD_RESULTS_TEXT=$(echo "*Build Results:*\n$(cat build_status.txt)" | jq -Rs '.')
 
           # Create the JSON payload directly using jq
           jq -n \
             --arg text "📦 Spellcarver Base Images Build Summary" \
             --arg repo_info "$REPO_INFO" \
-            --arg build_status "$BUILD_STATUS" \
+            --arg build_results "$BUILD_RESULTS_TEXT" \
             --arg workflow_url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             '{
               "text": $text,
@@ -280,7 +281,7 @@ jobs:
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": "*Build Results:*\n"+$build_status
+                    "text": $build_results
                   }
                 },
                 {
