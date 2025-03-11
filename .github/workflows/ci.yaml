@@ -219,15 +219,11 @@ jobs:
           pattern: build-status-*
           merge-multiple: true
 
-      - name: Generate build status details
-        id: generate-status
+      - name: Create Slack notification JSON
         run: |
-          # Extract build statuses to create status summary
-          BUILD_DATE=$(date '+%Y-%m-%d %H:%M:%S UTC')
-          echo "build_date=${BUILD_DATE}" >> $GITHUB_OUTPUT
+          # Generate a temporary file with all build statuses
+          echo "## Build Status Summary" > build_status.txt
 
-          # Generate status entries for each image
-          STATUS_ENTRIES=""
           MATRIX='${{ needs.prepare.outputs.matrix }}'
           echo "$MATRIX" | jq -c '.include[]' | while read -r item; do
             NAME=$(echo "$item" | jq -r '.name')
@@ -238,84 +234,80 @@ jobs:
             fi
 
             if [ "$STATUS" == "success" ]; then
-              EMOJI="✅"
+              echo "✅ *${NAME}*: ${STATUS}" >> build_status.txt
             elif [ "$STATUS" == "failure" ]; then
-              EMOJI="❌"
+              echo "❌ *${NAME}*: ${STATUS}" >> build_status.txt
             elif [ "$STATUS" == "cancelled" ]; then
-              EMOJI="⚠️"
+              echo "⚠️ *${NAME}*: ${STATUS}" >> build_status.txt
             else
-              EMOJI="❓"
-            fi
-
-            if [ -z "$STATUS_ENTRIES" ]; then
-              STATUS_ENTRIES="${EMOJI} *${NAME}*: ${STATUS}"
-            else
-              STATUS_ENTRIES="${STATUS_ENTRIES}\n${EMOJI} *${NAME}*: ${STATUS}"
+              echo "❓ *${NAME}*: ${STATUS}" >> build_status.txt
             fi
           done
 
-          echo "status_entries=${STATUS_ENTRIES}" >> $GITHUB_OUTPUT
+          # Get the content as escaped JSON string
+          BUILD_STATUS=$(cat build_status.txt | jq -Rs '.')
+          BUILD_DATE=$(date '+%Y-%m-%d %H:%M:%S UTC' | jq -Rs '.')
+          REPO_INFO=$(echo "*Repository:* ${{ github.repository }}\n*Branch:* ${{ github.ref_name }}\n*Commit:* ${{ github.sha }}\n*Build Date:* $(date '+%Y-%m-%d %H:%M:%S UTC')" | jq -Rs '.')
 
-      - name: Create and validate Slack payload
-        id: create-payload
-        run: |
-          cat > slack_payload.json << EOF
-          {
-            "text": "📦 Spellcarver Base Images Build Summary",
-            "blocks": [
-              {
-                "type": "header",
-                "text": {
-                  "type": "plain_text",
-                  "text": "📦 Spellcarver Base Images Build Summary",
-                  "emoji": true
-                }
-              },
-              {
-                "type": "section",
-                "text": {
-                  "type": "mrkdwn",
-                  "text": "*Repository:* ${{ github.repository }}\n*Branch:* ${{ github.ref_name }}\n*Commit:* ${{ github.sha }}\n*Build Date:* ${{ steps.generate-status.outputs.build_date }}"
-                }
-              },
-              {
-                "type": "divider"
-              },
-              {
-                "type": "section",
-                "text": {
-                  "type": "mrkdwn",
-                  "text": "*Build Results:*\n${{ steps.generate-status.outputs.status_entries }}"
-                }
-              },
-              {
-                "type": "actions",
-                "elements": [
-                  {
-                    "type": "button",
-                    "text": {
-                      "type": "plain_text",
-                      "text": "View Workflow Run",
-                      "emoji": true
-                    },
-                    "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          # Create the JSON payload directly using jq
+          jq -n \
+            --arg text "📦 Spellcarver Base Images Build Summary" \
+            --arg repo_info "$REPO_INFO" \
+            --arg build_status "$BUILD_STATUS" \
+            --arg workflow_url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            '{
+              "text": $text,
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "📦 Spellcarver Base Images Build Summary",
+                    "emoji": true
                   }
-                ]
-              }
-            ]
-          }
-          EOF
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": $repo_info
+                  }
+                },
+                {
+                  "type": "divider"
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Build Results:*\n"+$build_status
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Workflow Run",
+                        "emoji": true
+                      },
+                      "url": $workflow_url
+                    }
+                  ]
+                }
+              ]
+            }' > slack_payload.json
 
-          # Validate the JSON
+          # Validate the final JSON
           jq empty slack_payload.json || { echo "Invalid JSON"; exit 1; }
-          echo "JSON payload validated successfully"
-
-          # Set output path for the valid JSON file
-          echo "payload_path=slack_payload.json" >> $GITHUB_OUTPUT
+          echo "JSON payload created and validated successfully:"
+          cat slack_payload.json
 
       - name: Send Slack notification
         uses: slackapi/slack-github-action@v1.25.0
         with:
-          payload-file-path: ${{ steps.create-payload.outputs.payload_path }}
+          payload-file-path: slack_payload.json
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
