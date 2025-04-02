@@ -1,18 +1,30 @@
 # Build stage
 FROM cgr.dev/chainguard/wolfi-base:latest as builder
 
-# Install Python 3.11 and development tools
+# Install Python 3.11 and development tools with explicit virtual package handling
 RUN apk update && \
-    apk add python-3.11 py3-pip build-base python3-dev
+    apk add --no-cache --virtual .python-build-deps build-base && \
+    apk add --no-cache --update-cache \
+            --repository=https://packages.wolfi.dev/os \
+            python-3.11=3.11.11-r5 \
+            python-3.11-dev \
+            py3-pip && \
+    apk fix
 
-# Set Python 3.11 as the default
-RUN ln -sf /usr/bin/python3.11 /usr/bin/python && \
-    ln -sf /usr/bin/python3.11 /usr/bin/python3
+# Set Python 3.11 as the default without conflicting with system Python
+RUN mkdir -p /usr/local/bin && \
+    ln -sf /usr/bin/python3.11 /usr/local/bin/python && \
+    ln -sf /usr/bin/python3.11 /usr/local/bin/python3 && \
+    ln -sf /usr/bin/pip3.11 /usr/local/bin/pip3 && \
+    ln -sf /usr/bin/pip3.11 /usr/local/bin/pip
+
+# Update PATH to prioritize our symlinks
+ENV PATH="/usr/local/bin:$PATH"
 
 WORKDIR /app
 
-# Create and activate virtual environment
-RUN python -m venv /app/venv
+# Create and activate virtual environment with explicit Python path
+RUN /usr/bin/python3.11 -m venv /app/venv
 ENV PATH="/app/venv/bin:$PATH"
 
 # Copy and install requirements if you have any
@@ -22,11 +34,20 @@ ENV PATH="/app/venv/bin:$PATH"
 # Runtime stage
 FROM cgr.dev/chainguard/wolfi-base:latest
 
-# Install only Python 3.11 runtime
+# Install only Python 3.11 runtime with explicit version
 RUN apk update && \
-    apk add python-3.11 && \
-    ln -sf /usr/bin/python3.11 /usr/bin/python && \
-    ln -sf /usr/bin/python3.11 /usr/bin/python3
+    apk add --no-cache --update-cache \
+            --repository=https://packages.wolfi.dev/os \
+            python-3.11=3.11.11-r5 && \
+    apk fix
+
+# Set up symlinks in /usr/local to avoid conflicting with system Python
+RUN mkdir -p /usr/local/bin && \
+    ln -sf /usr/bin/python3.11 /usr/local/bin/python && \
+    ln -sf /usr/bin/python3.11 /usr/local/bin/python3
+
+# Update PATH to prioritize our symlinks
+ENV PATH="/usr/local/bin:$PATH"
 
 WORKDIR /app
 
@@ -38,4 +59,4 @@ ENV PATH="/app/venv/bin:$PATH"
 # COPY . .
 
 # Set the default command
-CMD ["python"]
+CMD ["/usr/bin/python3.11"]
