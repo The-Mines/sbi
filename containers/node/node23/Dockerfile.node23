@@ -3,29 +3,23 @@
 
 FROM cgr.dev/chainguard/wolfi-base:latest
 
-# Start as root user for installation and setup
-USER root
-
-# Set up environment variables
-ENV NODE_VERSION=23
-ENV NODE_PORT=3000
-ENV NPM_CONFIG_UPDATE_NOTIFIER=false
-ENV PATH=/usr/sbin:/sbin:/usr/bin:/bin
-
-# Install Node.js 23 and required packages
-# Deliberately avoid busybox and npm to minimize attack surface
+# Install Node.js 23 with minimal dependencies
 RUN apk update && \
     apk add --no-cache \
     nodejs-23 \
-    dumb-init \
-    nghttp2
+    dumb-init
 
-# Create a non-root user and group
-# Let the system choose available IDs instead of hardcoding
+# Create a non-root user for running the application
 RUN addgroup -S node && \
     adduser -S -G node -h /home/node node
 
-# Create application directory and set permissions
+# Set environment variables
+ENV NODE_ENV=production
+ENV NODE_PORT=3000
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false
+ENV PATH=$PATH:/usr/local/bin:/home/node/.npm/bin
+
+# Create and set permissions for app directory
 RUN mkdir -p /app && \
     chown -R node:node /app && \
     chmod 755 /app
@@ -36,9 +30,11 @@ WORKDIR /app
 # Switch to non-root user
 USER node
 
-# Set entrypoint and default command
+# Use dumb-init as entrypoint to handle signals properly
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
-CMD ["/usr/bin/node", "--help"]
+
+# Default command
+CMD ["node", "--version"]
 
 # Define metadata
 LABEL org.opencontainers.image.title="Node.js 23"
