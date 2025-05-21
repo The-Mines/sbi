@@ -1,16 +1,15 @@
 # Build stage
-FROM cgr.dev/chainguard/wolfi-base:latest as builder
+FROM ghcr.io/the-mines/sbi/wolfi:latest as builder
 
 # Install Python 3.11 and development tools with explicit virtual package handling
 RUN apk update && \
     apk add --no-cache --virtual .python-build-deps build-base && \
     apk add --no-cache --update-cache \
             --repository=https://packages.wolfi.dev/os \
-            python-3.11=3.11.11-r5 \
+            python-3.11 \
             python-3.11-dev \
             py3-pip && \
     apk fix
-
 # Set Python 3.11 as the default without conflicting with system Python
 RUN mkdir -p /usr/local/bin && \
     ln -sf /usr/bin/python3.11 /usr/local/bin/python && \
