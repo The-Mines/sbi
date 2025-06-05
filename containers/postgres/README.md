@@ -1,11 +1,20 @@
 # PostgreSQL Container
 
-This container provides PostgreSQL 17 based on the Wolfi Linux distribution. It's designed with security in mind, running as a non-root user and following best practices for containerized PostgreSQL.
+This container provides PostgreSQL 17 based on the Wolfi Linux distribution. It is built to closely mirror the Chainguard/OCI reference image, using the official `postgresql-oci-entrypoint` and including all recommended runtime packages for production and compatibility.
+
+## Key Features (Updated)
+
+- **Official Entrypoint**: Uses the robust `postgresql-oci-entrypoint` for initialization and startup, matching Chainguard and Docker Official Images.
+- **Essential Packages**: Includes `postgresql-17`, `postgresql-17-contrib`, `postgresql-17-client`, `gosu`, `postgresql-oci-entrypoint`, `libpq`, and `pgaudit`.
+- **Runs as root (UID 0)**: By default, the container runs as root to match the Chainguard config. If you require a non-root user, you can override the user at runtime.
+- **No custom entrypoint needed**: Initialization and script execution are handled by the official entrypoint.
+- **Supports `.sql` and `.sh` scripts**: Place initialization scripts in `/docker-entrypoint-initdb.d/` as with the official image.
 
 ## Basic Usage
 
 ```bash
 # Run PostgreSQL with default settings
+# (Entrypoint and initialization are handled automatically)
 docker run -d --name postgres -p 5432:5432 ghcr.io/the-mines/sbi/postgres:latest
 
 # Connect to the server
@@ -14,7 +23,7 @@ psql -h localhost -U postgres
 
 ## Environment Variables
 
-The container supports these configuration options:
+The container supports these configuration options (compatible with the official and Chainguard images):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -23,6 +32,22 @@ The container supports these configuration options:
 | `POSTGRES_DB` | `postgres` | Default database name |
 | `POSTGRES_HOST_AUTH_METHOD` | `trust` | Authentication method |
 | `PGDATA` | `/var/lib/postgresql/data` | Data directory location |
+| `POSTGRES_INITDB_ARGS` | *(unset)* | Extra args to pass to `initdb` |
+| `POSTGRES_INITDB_WALDIR` | *(unset)* | WAL directory location |
+
+## Entrypoint and Initialization
+
+- The container uses `/usr/bin/postgresql-oci-entrypoint` as its entrypoint.
+- On first run (when `$PGDATA` is empty), the entrypoint will initialize the database and run all `.sql` and `.sh` scripts in `/docker-entrypoint-initdb.d/`.
+- **Shell scripts must use `#!/bin/sh` as the shebang** (not `#!/bin/bash`).
+- Scripts must be executable (`chmod +x`).
+- No custom entrypoint script is needed; all initialization logic should be placed in the initdb directory.
+
+## Security Model
+
+- **Runs as root (UID 0)** by default, to match the Chainguard/OCI reference. You may override the user at runtime with `--user` if desired.
+- All directories are created and permissions set at build time.
+- The image includes only the minimal set of tools required for PostgreSQL operation and initialization.
 
 ## Data Persistence
 

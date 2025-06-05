@@ -37,7 +37,7 @@ FROM cgr.dev/chainguard/wolfi-base:latest
 RUN apk update && \
     apk add --no-cache --update-cache \
             --repository=https://packages.wolfi.dev/os \
-            python-3.11=3.11.11-r5 && \
+            python-3.11 && \
     apk fix
 
 # Set up symlinks in /usr/local to avoid conflicting with system Python
