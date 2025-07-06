@@ -22,6 +22,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
+  ORG: the-mines/sbi
   IMAGE_NAME: wolfi
 
 jobs:
