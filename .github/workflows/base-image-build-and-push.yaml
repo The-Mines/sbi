@@ -73,11 +73,15 @@ jobs:
       - name: Install apko
         run: |
           echo "📦 Installing apko ${APKO_VERSION}..."
-          # SHA256 checksum for apko v0.13.2
-          APKO_SHA256="5a2d27b85b12a6dc96316e7410540b2a4e959d4503c22bb2fe4de0f509e99772"
           
+          # Download the binary and checksums file
           wget https://github.com/chainguard-dev/apko/releases/download/${APKO_VERSION}/apko_${APKO_VERSION#v}_linux_amd64.tar.gz
-          echo "${APKO_SHA256}  apko_${APKO_VERSION#v}_linux_amd64.tar.gz" | sha256sum -c -
+          wget https://github.com/chainguard-dev/apko/releases/download/${APKO_VERSION}/checksums.txt
+          
+          # Verify the checksum
+          grep "apko_${APKO_VERSION#v}_linux_amd64.tar.gz" checksums.txt | sha256sum -c -
+          
+          # Extract and install
           tar -xzf apko_${APKO_VERSION#v}_linux_amd64.tar.gz
           chmod +x apko
           sudo mv apko /usr/local/bin/
@@ -87,10 +91,15 @@ jobs:
         run: |
           echo "📦 Installing crane..."
           CRANE_VERSION="v0.19.1"
-          CRANE_SHA256="6aa73246dd8be1b03c18e97f5cd4b5f7c87bb1b7ec6d5cd36f1f4bb25a2f9b21"
           
+          # Download the binary and checksums file
           wget -O crane.tar.gz https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz
-          echo "${CRANE_SHA256}  crane.tar.gz" | sha256sum -c -
+          wget https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/checksums.txt
+          
+          # Verify the checksum
+          grep "go-containerregistry_Linux_x86_64.tar.gz" checksums.txt | sha256sum -c -
+          
+          # Extract and install
           tar -xzf crane.tar.gz
           chmod +x crane
           sudo mv crane /usr/local/bin/
