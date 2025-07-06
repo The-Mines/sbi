@@ -22,7 +22,6 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  ORG: the-mines/sbi
   IMAGE_NAME: wolfi
 
 jobs:
@@ -63,7 +62,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.ORG }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest
             type=raw,value=${{ steps.sha.outputs.short_sha }}
@@ -101,38 +100,38 @@ jobs:
           docker images | grep wolfi
           
           # Tag the amd64 image
-          docker tag wolfi:latest-amd64 ${{ env.REGISTRY }}/${{ env.ORG }}/${{ env.IMAGE_NAME }}:amd64
+          docker tag wolfi:latest-amd64 ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:amd64
           
           # Load arm64 and tag
           docker load < wolfi-arm64.tar
-          docker tag wolfi:latest-arm64 ${{ env.REGISTRY }}/${{ env.ORG }}/${{ env.IMAGE_NAME }}:arm64
+          docker tag wolfi:latest-arm64 ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:arm64
 
       - name: Push images and create manifest
         if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.push)
         run: |
           # Push architecture-specific images
           echo "📤 Pushing architecture-specific images..."
-          docker push ${{ env.REGISTRY }}/${{ env.ORG }}/${{ env.IMAGE_NAME }}:amd64
-          docker push ${{ env.REGISTRY }}/${{ env.ORG }}/${{ env.IMAGE_NAME }}:arm64
+          docker push ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:amd64
+          docker push ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:arm64
           
           # Create and push multi-arch manifests for each tag
           echo "📦 Creating multi-arch manifests..."
           for tag in ${{ steps.meta.outputs.tags }}; do
             # Extract just the tag name from the full image reference
-            TAG_NAME=$(echo "$tag" | sed "s|${{ env.REGISTRY }}/${{ env.ORG }}/${{ env.IMAGE_NAME }}:||")
+            TAG_NAME=$(echo "$tag" | sed "s|${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:||")
             echo "Creating manifest for tag: $TAG_NAME"
             
             docker manifest create "$tag" \
-              --amend "${{ env.REGISTRY }}/${{ env.ORG }}/${{ env.IMAGE_NAME }}:amd64" \
-              --amend "${{ env.REGISTRY }}/${{ env.ORG }}/${{ env.IMAGE_NAME }}:arm64"
+              --amend "${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:amd64" \
+              --amend "${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:arm64"
             
             docker manifest push "$tag"
           done
           
           # Get the digest of the latest tag
-          DIGEST=$(crane digest "${{ env.REGISTRY }}/${{ env.ORG }}/${{ env.IMAGE_NAME }}:latest")
+          DIGEST=$(crane digest "${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest")
           echo "digest=${DIGEST}" >> $GITHUB_OUTPUT
-          echo "image=${{ env.REGISTRY }}/${{ env.ORG }}/${{ env.IMAGE_NAME }}@${DIGEST}" >> $GITHUB_OUTPUT
+          echo "image=${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}@${DIGEST}" >> $GITHUB_OUTPUT
 
       - name: Sign container image with cosign
         if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.push)
@@ -141,7 +140,7 @@ jobs:
           
           # Sign the multi-arch image by digest
           cosign sign --yes \
-            "${{ env.REGISTRY }}/${{ env.ORG }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}"
+            "${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}"
           
           echo "✅ Image signed successfully"
 
@@ -167,13 +166,13 @@ jobs:
                 }
               }
             }') \
-            "${{ env.REGISTRY }}/${{ env.ORG }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}"
+            "${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}"
 
       - name: Run Trivy vulnerability scanner
         if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.push)
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.ORG }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          image-ref: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
           format: 'table'
           output: 'trivy-results.txt'
           severity: 'CRITICAL,HIGH'
@@ -223,7 +222,7 @@ jobs:
           cosign verify \
             --certificate-identity-regexp "https://github.com/${{ github.repository }}/.github/workflows/base-image-build-and-push.yaml@.*" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-            "${{ env.REGISTRY }}/${{ env.ORG }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}" | jq .
+            "${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}" | jq .
 
       - name: Upload SBOM artifacts
         uses: actions/upload-artifact@v4
@@ -296,7 +295,7 @@ jobs:
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": "*Image:* `${{ env.REGISTRY }}/${{ env.ORG }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}`\n*Note:* The image has been published despite vulnerabilities. Please review and remediate urgently."
+                    "text": "*Image:* `${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}`\n*Note:* The image has been published despite vulnerabilities. Please review and remediate urgently."
                   }
                 },
                 {
