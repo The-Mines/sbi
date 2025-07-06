@@ -89,29 +89,31 @@ jobs:
           echo "🔨 Building multi-arch Wolfi base image..."
           
           if [ "${{ github.event_name }}" == "schedule" ] || [ "${{ inputs.push }}" == "true" ]; then
-            # Build and push directly to registry using apko container
-            # Pass Docker config for authentication
+            # Build to local tar first, then push with crane
+            echo "🔨 Building multi-arch Wolfi base image to tar..."
             docker run --rm \
               -v "${PWD}":/work \
-              -v "${HOME}/.docker/config.json":/root/.docker/config.json:ro \
               -w /work \
               cgr.dev/chainguard/apko:latest \
-              publish wolfi-direct.apko.yaml \
-              "${{ steps.meta.outputs.full_image }}" \
+              build wolfi-direct.apko.yaml \
+              wolfi-base:latest \
+              wolfi-base.tar \
               --arch x86_64,aarch64 \
               --sbom \
-              --sbom-formats spdx \
-              --vcs \
-              2>&1 | tee apko-output.log
+              --sbom-formats spdx
             
-            # Use crane to get the canonical digest from the registry
+            # Push the tar to registry using crane
+            echo "📤 Pushing image to registry..."
+            crane push wolfi-base.tar "${{ steps.meta.outputs.full_image }}"
+            
+            # Get the digest after push
             DIGEST=$(crane digest "${{ steps.meta.outputs.full_image }}")
             echo "digest=${DIGEST}" >> $GITHUB_OUTPUT
             echo "image=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${DIGEST}" >> $GITHUB_OUTPUT
             
-            # Also tag with date
-            crane tag "${{ steps.meta.outputs.full_image }}@${DIGEST}" "${{ steps.meta.outputs.date_tag }}"
-            crane tag "${{ steps.meta.outputs.full_image }}@${DIGEST}" "${{ steps.meta.outputs.short_sha }}"
+            # Also tag with date and short SHA
+            crane tag "${{ steps.meta.outputs.full_image }}" "${{ steps.meta.outputs.date_tag }}"
+            crane tag "${{ steps.meta.outputs.full_image }}" "${{ steps.meta.outputs.short_sha }}"
           else
             # Build locally without pushing using apko container
             docker run --rm \
