@@ -13,12 +13,14 @@ on:
   pull_request:
     paths:
       - 'containers/**'
+      - '!containers/wolfi-base/**'
       - '.github/workflows/ci.yaml'
   push:
     branches:
       - main
     paths:
       - 'containers/**'
+      - '!containers/wolfi-base/**'
       - '.github/workflows/ci.yaml'
   schedule:
     - cron: '0 9 * * 5' # Runs every Friday at 09:00 UTC
