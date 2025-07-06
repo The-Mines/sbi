@@ -72,6 +72,12 @@ jobs:
       - name: Setup crane
         uses: imjasonh/setup-crane@v0.3
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Log in to GitHub Container Registry
         if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.push)
         uses: docker/login-action@v3
@@ -80,58 +86,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build multi-arch image with apko
+      - name: Build and push multi-arch image with apko
         id: build
+        uses: chainguard-dev/actions/apko@main
+        with:
+          config: containers/wolfi-base/wolfi-direct.apko.yaml
+          tag: ${{ steps.meta.outputs.full_image }}
+          push: ${{ github.event_name == 'schedule' || inputs.push }}
+          archs: x86_64,aarch64
+          
+      - name: Get image digest and add tags
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.push)
         run: |
-          cd containers/wolfi-base
+          # Get the digest
+          DIGEST=$(crane digest "${{ steps.meta.outputs.full_image }}")
+          echo "digest=${DIGEST}" >> $GITHUB_OUTPUT
+          echo "image=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${DIGEST}" >> $GITHUB_OUTPUT
           
-          # Build image with apko
-          echo "🔨 Building multi-arch Wolfi base image..."
-          
-          if [ "${{ github.event_name }}" == "schedule" ] || [ "${{ inputs.push }}" == "true" ]; then
-            # Create auth config for apko
-            echo "🔐 Setting up registry authentication..."
-            mkdir -p ~/.docker
-            echo "{\"auths\":{\"${{ env.REGISTRY }}\":{\"auth\":\"$(echo -n '${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}' | base64)\"}}}" > ~/.docker/config.json
-            
-            # Build and push directly to registry using apko
-            echo "🔨 Building and pushing multi-arch Wolfi base image..."
-            docker run --rm \
-              -v "${PWD}":/work \
-              -v "${HOME}/.docker":/root/.docker:ro \
-              -w /work \
-              cgr.dev/chainguard/apko:latest \
-              publish wolfi-direct.apko.yaml \
-              "${{ steps.meta.outputs.full_image }}" \
-              --arch x86_64,aarch64 \
-              --sbom \
-              --sbom-formats spdx \
-              2>&1 | tee apko-output.log
-            
-            # Get the digest after push
-            DIGEST=$(crane digest "${{ steps.meta.outputs.full_image }}")
-            echo "digest=${DIGEST}" >> $GITHUB_OUTPUT
-            echo "image=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${DIGEST}" >> $GITHUB_OUTPUT
-            
-            # Also tag with date and short SHA
-            crane tag "${{ steps.meta.outputs.full_image }}" "${{ steps.meta.outputs.date_tag }}"
-            crane tag "${{ steps.meta.outputs.full_image }}" "${{ steps.meta.outputs.short_sha }}"
-          else
-            # Build locally without pushing using apko container
-            docker run --rm \
-              -v "${PWD}":/work \
-              -w /work \
-              cgr.dev/chainguard/apko:latest \
-              build wolfi-direct.apko.yaml \
-              wolfi-base:latest \
-              wolfi-base.tar \
-              --arch x86_64,aarch64 \
-              --sbom \
-              --sbom-formats spdx
-            
-            echo "digest=local-build" >> $GITHUB_OUTPUT
-            echo "image=wolfi-base:latest" >> $GITHUB_OUTPUT
-          fi
+          # Also tag with date and short SHA
+          crane tag "${{ steps.meta.outputs.full_image }}" "${{ steps.meta.outputs.date_tag }}"
+          crane tag "${{ steps.meta.outputs.full_image }}" "${{ steps.meta.outputs.short_sha }}"
 
       - name: Sign container image with cosign
         if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.push)
