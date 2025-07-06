@@ -82,24 +82,30 @@ jobs:
           # Build for each architecture separately
           echo "🔨 Building Wolfi base image for amd64..."
           docker run --rm -v "${PWD}":/work cgr.dev/chainguard/apko:latest \
-            build wolfi-direct.apko.yaml wolfi:amd64 wolfi-amd64.tar \
+            build wolfi-direct.apko.yaml wolfi:latest wolfi-amd64.tar \
             --arch x86_64 \
             --sbom --sbom-formats spdx
           
           echo "🔨 Building Wolfi base image for arm64..."
           docker run --rm -v "${PWD}":/work cgr.dev/chainguard/apko:latest \
-            build wolfi-direct.apko.yaml wolfi:arm64 wolfi-arm64.tar \
+            build wolfi-direct.apko.yaml wolfi:latest wolfi-arm64.tar \
             --arch aarch64 \
             --sbom --sbom-formats spdx
           
           # Load images into Docker
           echo "📦 Loading images into Docker..."
           docker load < wolfi-amd64.tar
-          docker load < wolfi-arm64.tar
           
-          # Tag images for each architecture
-          docker tag wolfi:amd64 ${{ env.REGISTRY }}/${{ env.ORG }}/${{ env.IMAGE_NAME }}:amd64
-          docker tag wolfi:arm64 ${{ env.REGISTRY }}/${{ env.ORG }}/${{ env.IMAGE_NAME }}:arm64
+          # List loaded images to see what was actually loaded
+          echo "📋 Loaded images:"
+          docker images | grep wolfi
+          
+          # Tag the amd64 image
+          docker tag wolfi:latest-amd64 ${{ env.REGISTRY }}/${{ env.ORG }}/${{ env.IMAGE_NAME }}:amd64
+          
+          # Load arm64 and tag
+          docker load < wolfi-arm64.tar
+          docker tag wolfi:latest-arm64 ${{ env.REGISTRY }}/${{ env.ORG }}/${{ env.IMAGE_NAME }}:arm64
 
       - name: Push images and create manifest
         if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.push)
