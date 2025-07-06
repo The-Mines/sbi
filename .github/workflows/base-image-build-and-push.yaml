@@ -28,7 +28,6 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: the-mines/sbi/wolfi
-  APKO_VERSION: v0.13.2
 
 jobs:
   build-and-push:
@@ -70,40 +69,8 @@ jobs:
         with:
           cosign-release: 'v2.2.3'
 
-      - name: Install apko
-        run: |
-          echo "📦 Installing apko ${APKO_VERSION}..."
-          
-          # Download the binary and checksums file
-          wget https://github.com/chainguard-dev/apko/releases/download/${APKO_VERSION}/apko_${APKO_VERSION#v}_linux_amd64.tar.gz
-          wget https://github.com/chainguard-dev/apko/releases/download/${APKO_VERSION}/checksums.txt
-          
-          # Verify the checksum
-          grep "apko_${APKO_VERSION#v}_linux_amd64.tar.gz" checksums.txt | sha256sum -c -
-          
-          # Extract and install
-          tar -xzf apko_${APKO_VERSION#v}_linux_amd64.tar.gz
-          chmod +x apko
-          sudo mv apko /usr/local/bin/
-          apko version
-
-      - name: Install crane for registry operations
-        run: |
-          echo "📦 Installing crane..."
-          CRANE_VERSION="v0.19.1"
-          
-          # Download the binary and checksums file
-          wget -O crane.tar.gz https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz
-          wget https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/checksums.txt
-          
-          # Verify the checksum
-          grep "go-containerregistry_Linux_x86_64.tar.gz" checksums.txt | sha256sum -c -
-          
-          # Extract and install
-          tar -xzf crane.tar.gz
-          chmod +x crane
-          sudo mv crane /usr/local/bin/
-          crane version
+      - name: Setup crane
+        uses: imjasonh/setup-crane@v0.3
 
       - name: Log in to GitHub Container Registry
         if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.push)
@@ -122,8 +89,12 @@ jobs:
           echo "🔨 Building multi-arch Wolfi base image..."
           
           if [ "${{ github.event_name }}" == "schedule" ] || [ "${{ inputs.push }}" == "true" ]; then
-            # Build and push directly to registry
-            apko publish wolfi-direct.apko.yaml \
+            # Build and push directly to registry using apko container
+            docker run --rm \
+              -v "${PWD}":/work \
+              -w /work \
+              cgr.dev/chainguard/apko:latest \
+              publish wolfi-direct.apko.yaml \
               "${{ steps.meta.outputs.full_image }}" \
               --arch x86_64,aarch64 \
               --sbom \
@@ -140,8 +111,12 @@ jobs:
             crane tag "${{ steps.meta.outputs.full_image }}@${DIGEST}" "${{ steps.meta.outputs.date_tag }}"
             crane tag "${{ steps.meta.outputs.full_image }}@${DIGEST}" "${{ steps.meta.outputs.short_sha }}"
           else
-            # Build locally without pushing
-            apko build wolfi-direct.apko.yaml \
+            # Build locally without pushing using apko container
+            docker run --rm \
+              -v "${PWD}":/work \
+              -w /work \
+              cgr.dev/chainguard/apko:latest \
+              build wolfi-direct.apko.yaml \
               wolfi-base:latest \
               wolfi-base.tar \
               --arch x86_64,aarch64 \
