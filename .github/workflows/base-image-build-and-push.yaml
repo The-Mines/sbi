@@ -89,22 +89,24 @@ jobs:
           echo "🔨 Building multi-arch Wolfi base image..."
           
           if [ "${{ github.event_name }}" == "schedule" ] || [ "${{ inputs.push }}" == "true" ]; then
-            # Build to local tar first, then push with crane
-            echo "🔨 Building multi-arch Wolfi base image to tar..."
+            # Create auth config for apko
+            echo "🔐 Setting up registry authentication..."
+            mkdir -p ~/.docker
+            echo "{\"auths\":{\"${{ env.REGISTRY }}\":{\"auth\":\"$(echo -n '${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}' | base64)\"}}}" > ~/.docker/config.json
+            
+            # Build and push directly to registry using apko
+            echo "🔨 Building and pushing multi-arch Wolfi base image..."
             docker run --rm \
               -v "${PWD}":/work \
+              -v "${HOME}/.docker":/root/.docker:ro \
               -w /work \
               cgr.dev/chainguard/apko:latest \
-              build wolfi-direct.apko.yaml \
-              wolfi-base:latest \
-              wolfi-base.tar \
+              publish wolfi-direct.apko.yaml \
+              "${{ steps.meta.outputs.full_image }}" \
               --arch x86_64,aarch64 \
               --sbom \
-              --sbom-formats spdx
-            
-            # Push the tar to registry using crane
-            echo "📤 Pushing image to registry..."
-            crane push wolfi-base.tar "${{ steps.meta.outputs.full_image }}"
+              --sbom-formats spdx \
+              2>&1 | tee apko-output.log
             
             # Get the digest after push
             DIGEST=$(crane digest "${{ steps.meta.outputs.full_image }}")
