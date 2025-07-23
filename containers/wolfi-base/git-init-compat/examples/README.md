@@ -10,6 +10,12 @@ use the git-init compatibility container.
 The original Tekton git-clone task v0.7 that expects the old git-init binary.
 This task demonstrates the compatibility issue with modern Git versions.
 
+### git-clone-task-v07-subdirectory.yaml
+
+Modified version of the git-clone task that defaults to cloning into a
+subdirectory. This solves workspace permission issues with persistent volumes.
+**Recommended for production use.**
+
 ### tekton-git-clone-example.yaml
 
 Example TaskRun that uses the git-init compatibility container to successfully
@@ -24,6 +30,12 @@ params:
 ### tekton-git-clone-small-repo.yaml
 
 Alternative example using a smaller test repository for quick testing.
+
+### pipeline-with-subdirectory.yaml
+
+Complete pipeline example showing how to use the subdirectory approach to avoid
+workspace mount permission issues. Includes both the Pipeline and PipelineRun
+definitions.
 
 ## Running the Examples
 

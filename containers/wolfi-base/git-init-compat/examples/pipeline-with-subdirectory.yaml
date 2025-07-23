@@ -1,0 +1,82 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: build-with-subdirectory
+spec:
+  description: |
+    Pipeline that demonstrates using the subdirectory approach to avoid
+    workspace mount point permission issues. The git-clone task clones
+    into /workspace/output/source instead of /workspace/output/
+  params:
+    - name: repo-url
+      type: string
+      description: The git repository URL to clone from
+    - name: revision
+      type: string
+      description: Git revision to checkout (branch, tag, sha)
+      default: main
+  workspaces:
+    - name: shared-data
+      description: |
+        This workspace contains the cloned repo files, so they can be read by the
+        next task.
+  tasks:
+    - name: fetch-source
+      taskRef:
+        name: git-clone-subdirectory
+      workspaces:
+        - name: output
+          workspace: shared-data
+      params:
+        - name: url
+          value: $(params.repo-url)
+        - name: revision
+          value: $(params.revision)
+        - name: subdirectory
+          value: source # Clone into 'source' subdirectory
+        - name: gitInitImage
+          value: ghcr.io/the-mines/sbi/git-init-compat:latest
+
+    - name: list-source
+      runAfter: ["fetch-source"]
+      workspaces:
+        - name: source
+          workspace: shared-data
+      taskSpec:
+        workspaces:
+          - name: source
+        steps:
+          - name: list
+            image: alpine
+            script: |
+              #!/bin/sh
+              echo "=== Workspace root contents ==="
+              ls -la $(workspaces.source.path)/
+
+              echo -e "\n=== Source directory contents ==="
+              ls -la $(workspaces.source.path)/source/
+
+              echo -e "\n=== Repository files ==="
+              cd $(workspaces.source.path)/source && find . -type f | head -20
+---
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  name: build-with-subdirectory-run
+spec:
+  pipelineRef:
+    name: build-with-subdirectory
+  params:
+    - name: repo-url
+      value: https://github.com/octocat/Hello-World
+    - name: revision
+      value: master
+  workspaces:
+    - name: shared-data
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 1Gi
