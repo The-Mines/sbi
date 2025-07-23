@@ -1,0 +1,21 @@
+apiVersion: tekton.dev/v1beta1
+kind: TaskRun
+metadata:
+  name: git-clone-hello-world
+spec:
+  taskRef:
+    name: git-clone
+    kind: Task
+    bundle: ghcr.io/tektoncd/catalog/upstream/tasks/git-clone:0.9
+  params:
+    - name: url
+      value: https://github.com/octocat/Hello-World # Small test repo
+    - name: revision
+      value: master
+    - name: verbose
+      value: "true"
+    - name: gitInitImage
+      value: ghcr.io/distroless/git:latest
+  workspaces:
+    - name: output
+      emptyDir: {} # Using emptyDir for quick testing

@@ -1,0 +1,22 @@
+apiVersion: tekton.dev/v1beta1
+kind: TaskRun
+metadata:
+  name: git-clone-compat-test
+spec:
+  podTemplate:
+    imagePullSecrets:
+      - name: ghcr-token
+  taskRef:
+    name: git-clone-v07
+  params:
+    - name: url
+      value: https://github.com/octocat/Hello-World
+    - name: revision
+      value: master
+    - name: gitInitImage
+      value: ghcr.io/the-mines/sbi/git-init-compat:latest
+    - name: verbose
+      value: "true"
+  workspaces:
+    - name: output
+      emptyDir: {}
