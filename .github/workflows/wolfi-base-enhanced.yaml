@@ -93,10 +93,8 @@ jobs:
           # Always include latest
           TAGS="${BASE_IMAGE}:latest"
 
-          # Add date tag for scheduled builds
-          if [[ "${{ github.event_name }}" == "schedule" ]]; then
-            TAGS="${TAGS},${BASE_IMAGE}:${{ steps.env.outputs.build_date }}"
-          fi
+          # Always add date tag (for CVE tracking and emergency builds)
+          TAGS="${TAGS},${BASE_IMAGE}:${{ steps.env.outputs.build_date }}"
 
           # Add commit SHA tag
           TAGS="${TAGS},${BASE_IMAGE}:${{ steps.env.outputs.short_sha }}"
