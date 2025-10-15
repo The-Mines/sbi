@@ -10,7 +10,7 @@ The Spellcarver Base Images repository contains a collection of carefully curate
 
 Our images are built on the secure Wolfi OS base, a minimalist, security-focused operating system designed specifically for containers. To maintain the highest security standards:
 
-- **Wolfi Base:** Automated builds Monday/Thursday at 8 AM Eastern
+- **Wolfi Base:** Automated builds Monday/Thursday at 8 AM Eastern, Friday at 8 AM UTC
 - **Other Images:** Automated builds every Friday at 9 AM UTC
 - **Push to Main:** All images rebuild automatically on commits to main branch
 - Regular CVE (Common Vulnerabilities and Exposures) scans and patches using Trivy
@@ -50,13 +50,14 @@ All images are published to GitHub Container Registry at `ghcr.io/the-mines/sbi/
 
 ### CI/CD Workflows
 
-**Base Image Workflow** (`.github/workflows/base-image-build-and-push.yaml`):
+**Wolfi Base Image Workflow** (`.github/workflows/wolfi-base-enhanced.yaml`):
 - Builds Wolfi base image using apko tool
 - Multi-architecture support (x86_64, aarch64)
 - Automated security scanning with Trivy
 - Cosign keyless signing
 - SLSA provenance generation
-- Runs Monday/Thursday at 8 AM Eastern and on manual dispatch
+- Runs Monday/Thursday at 8 AM Eastern, Friday at 8 AM UTC (before dependent images)
+- Manual workflow dispatch available
 
 **Container Images Workflow** (`.github/workflows/ci.yaml`):
 - Matrix-based builds for all non-Wolfi images

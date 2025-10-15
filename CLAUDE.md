@@ -49,11 +49,12 @@ For other images, test scripts are located in `containers/{image}/tests/`
   - Wolfi base uses apko configuration instead of Dockerfile
 
 ### CI/CD Architecture
-1. **Base Image Workflow** (`base-image-build-and-push.yaml`):
+1. **Wolfi Base Image Workflow** (`wolfi-base-enhanced.yaml`):
    - Builds Wolfi base using apko tool
-   - Runs Monday/Thursday at 8 AM Eastern
+   - Runs Monday/Thursday at 8 AM Eastern, Friday at 8 AM UTC
    - Multi-arch support (x86_64, aarch64)
    - Includes cosign signing, SLSA provenance, and Trivy scanning
+   - Friday build ensures fresh CVE patches before dependent images build
 
 2. **Container Images Workflow** (`ci.yaml`):
    - Matrix builds for all non-Wolfi images
