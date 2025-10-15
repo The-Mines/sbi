@@ -214,7 +214,7 @@ jobs:
         run: |
           echo "📋 Generating SLSA provenance..."
           cosign attest --yes \
-            --predicate-type slsaprovenance \
+            --type slsaprovenance \
             --predicate <(echo '{
               "buildType": "https://github.com/chainguard-dev/apko",
               "builder": {
