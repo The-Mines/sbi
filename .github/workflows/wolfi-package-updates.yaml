@@ -162,14 +162,27 @@ jobs:
       - name: Create update notification issue
         if: steps.check.outputs.has_updates == 'true' || github.event_name == 'workflow_dispatch'
         uses: actions/github-script@v7
+        env:
+          HAS_UPDATES: ${{ steps.check.outputs.has_updates }}
+          LAST_CHECK: ${{ steps.compare.outputs.last_check }}
+          CONFIG_FILE_PATH: ${{ env.CONFIG_FILE }}
+          PACKAGES: ${{ steps.current.outputs.packages }}
+          TOTAL_PACKAGES: ${{ steps.stats.outputs.total_packages }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
+            const hasUpdates = process.env.HAS_UPDATES === 'true';
+            const packagesArray = process.env.PACKAGES.split('\n').filter(p => p.length > 0);
+            const actionsNeeded = hasUpdates
+              ? '⚠️ **Some packages may need attention** - Check the workflow logs for details.'
+              : '✅ All packages are available in the Wolfi repository.';
+
             const title = '📦 Wolfi Package Update Check - ' + new Date().toISOString().split('T')[0];
             const body = `# Wolfi Package Update Check Results
 
             **Check Date:** ${new Date().toUTCString()}
-            **Last Check:** ${{ steps.compare.outputs.last_check }}
+            **Last Check:** ${process.env.LAST_CHECK}
 
             ## Summary
 
@@ -177,25 +190,25 @@ jobs:
 
             ### Current Configuration
 
-            Packages in \`${{ env.CONFIG_FILE }}\`:
+            Packages in \`${process.env.CONFIG_FILE_PATH}\`:
             \`\`\`
-            ${{ steps.current.outputs.packages }}
+            ${process.env.PACKAGES}
             \`\`\`
 
             ### Repository Statistics
 
-            - **Total Wolfi Packages Available:** ${{ steps.stats.outputs.total_packages }}
-            - **Packages in Our Config:** ${('${{ steps.current.outputs.packages }}'.match(/\n/g) || []).length + 1}
+            - **Total Wolfi Packages Available:** ${process.env.TOTAL_PACKAGES}
+            - **Packages in Our Config:** ${packagesArray.length}
 
             ### Actions Needed
 
-            ${{ steps.check.outputs.has_updates == 'true' && '⚠️ **Some packages may need attention** - Check the workflow logs for details.' || '✅ All packages are available in the Wolfi repository.' }}
+            ${actionsNeeded}
 
             ### Important Notes
 
             - Wolfi has a package retention policy: non-latest versions older than 12 months will be removed (reducing to 3 months)
             - Check [Wolfi Security Advisories](https://github.com/wolfi-dev/advisories) regularly
-            - Review the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for detailed information
+            - Review the [workflow run](${process.env.RUN_URL}) for detailed information
 
             ### Recommendations
 
