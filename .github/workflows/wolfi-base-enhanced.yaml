@@ -49,6 +49,12 @@ jobs:
   build-and-publish:
     runs-on: ubuntu-latest
     name: Build and Publish Wolfi Base
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      security-events: write
+      issues: write
     outputs:
       image_digest: ${{ steps.publish.outputs.digest }}
       image_ref: ${{ steps.publish.outputs.image_ref }}
