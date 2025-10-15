@@ -1,0 +1,309 @@
+name: Check Wolfi Package Updates
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+on:
+  schedule:
+    # Run every Monday at 9:00 AM UTC (check for weekly updates)
+    - cron: '0 9 * * 1'
+
+  workflow_dispatch:
+    inputs:
+      create_pr:
+        description: 'Create PR if updates found'
+        required: false
+        type: boolean
+        default: true
+
+env:
+  CONFIG_FILE: containers/wolfi-base/wolfi-direct.apko.yaml
+  WOLFI_REPO: https://packages.wolfi.dev/os
+
+jobs:
+  check-updates:
+    runs-on: ubuntu-latest
+    name: Check for Wolfi Package Updates
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl jq
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+          yq --version
+
+      - name: Extract current packages
+        id: current
+        run: |
+          echo "Extracting packages from $CONFIG_FILE..."
+          PACKAGES=$(yq eval '.contents.packages[]' $CONFIG_FILE)
+          echo "Current packages:"
+          echo "$PACKAGES"
+          echo "packages<<EOF" >> $GITHUB_OUTPUT
+          echo "$PACKAGES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Check Wolfi repository for updates
+        id: check
+        run: |
+          echo "🔍 Checking Wolfi repository for package information..."
+          echo "Repository: $WOLFI_REPO"
+
+          # Download and extract the APKINDEX
+          echo "Downloading package index..."
+          curl -fsSL "${WOLFI_REPO}/x86_64/APKINDEX.tar.gz" -o APKINDEX.tar.gz
+          tar -xzf APKINDEX.tar.gz APKINDEX
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# 📦 Wolfi Package Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Package | Status | Notes |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------|-------|" >> $GITHUB_STEP_SUMMARY
+
+          HAS_UPDATES=false
+
+          # Check each package
+          while IFS= read -r pkg; do
+            echo "Checking package: $pkg"
+
+            # Search for package in index
+            PKG_INFO=$(grep -A 20 "^P:${pkg}$" APKINDEX | head -30 || echo "")
+
+            if [ -n "$PKG_INFO" ]; then
+              VERSION=$(echo "$PKG_INFO" | grep "^V:" | head -1 | cut -d: -f2)
+              DESCRIPTION=$(echo "$PKG_INFO" | grep "^T:" | head -1 | cut -d: -f2-)
+
+              if [ -n "$VERSION" ]; then
+                echo "  ✅ Found: $pkg version $VERSION"
+                echo "| \`$pkg\` | ✅ Available | v${VERSION} |" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "  ⚠️ Found but no version for: $pkg"
+                echo "| \`$pkg\` | ⚠️ Found | No version info |" >> $GITHUB_STEP_SUMMARY
+              fi
+            else
+              echo "  ❌ Not found: $pkg"
+              echo "| \`$pkg\` | ❌ Not Found | Package may have been removed |" >> $GITHUB_STEP_SUMMARY
+              HAS_UPDATES=true
+            fi
+          done <<< "${{ steps.current.outputs.packages }}"
+
+          echo "has_updates=${HAS_UPDATES}" >> $GITHUB_OUTPUT
+
+          rm -f APKINDEX APKINDEX.tar.gz
+
+      - name: Get Wolfi package statistics
+        id: stats
+        run: |
+          echo "📊 Gathering Wolfi repository statistics..."
+
+          # Download index again for stats
+          curl -fsSL "${WOLFI_REPO}/x86_64/APKINDEX.tar.gz" -o APKINDEX.tar.gz
+          tar -xzf APKINDEX.tar.gz APKINDEX
+
+          TOTAL_PACKAGES=$(grep -c "^P:" APKINDEX || echo "0")
+          echo "total_packages=${TOTAL_PACKAGES}" >> $GITHUB_OUTPUT
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📊 Wolfi Repository Statistics" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Total Available Packages:** ${TOTAL_PACKAGES}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Packages in Config:** $(echo '${{ steps.current.outputs.packages }}' | wc -l)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Last Checked:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+
+          rm -f APKINDEX APKINDEX.tar.gz
+
+      - name: Check for security advisories
+        id: security
+        run: |
+          echo "🔒 Checking for security advisories..."
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🔒 Security Information" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "For security advisories and CVE information, check:" >> $GITHUB_STEP_SUMMARY
+          echo "- [Wolfi Security Advisories](https://github.com/wolfi-dev/advisories)" >> $GITHUB_STEP_SUMMARY
+          echo "- [Chainguard Security Advisories](https://www.chainguard.dev/security-advisories)" >> $GITHUB_STEP_SUMMARY
+
+      - name: Compare with previous check
+        id: compare
+        run: |
+          echo "📈 Tracking changes over time..."
+
+          # Create or update a tracking file
+          mkdir -p .github/wolfi-tracking
+          TRACKING_FILE=".github/wolfi-tracking/last-check.json"
+          CURRENT_DATE=$(date -u +'%Y-%m-%d')
+
+          if [ -f "$TRACKING_FILE" ]; then
+            LAST_CHECK=$(jq -r '.date' "$TRACKING_FILE" 2>/dev/null || echo "unknown")
+            echo "Last check was: $LAST_CHECK"
+          else
+            echo "No previous check found"
+            LAST_CHECK="never"
+          fi
+
+          # Create tracking data
+          cat > "$TRACKING_FILE" <<EOF
+          {
+            "date": "$CURRENT_DATE",
+            "packages": $(echo '${{ steps.current.outputs.packages }}' | jq -R -s -c 'split("\n") | map(select(length > 0))'),
+            "total_wolfi_packages": ${{ steps.stats.outputs.total_packages }},
+            "check_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          }
+          EOF
+
+          echo "last_check=${LAST_CHECK}" >> $GITHUB_OUTPUT
+
+      - name: Create update notification issue
+        if: steps.check.outputs.has_updates == 'true' || github.event_name == 'workflow_dispatch'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const title = '📦 Wolfi Package Update Check - ' + new Date().toISOString().split('T')[0];
+            const body = `# Wolfi Package Update Check Results
+
+            **Check Date:** ${new Date().toUTCString()}
+            **Last Check:** ${{ steps.compare.outputs.last_check }}
+
+            ## Summary
+
+            This automated check reviews the Wolfi package repository for updates and changes.
+
+            ### Current Configuration
+
+            Packages in \`${{ env.CONFIG_FILE }}\`:
+            \`\`\`
+            ${{ steps.current.outputs.packages }}
+            \`\`\`
+
+            ### Repository Statistics
+
+            - **Total Wolfi Packages Available:** ${{ steps.stats.outputs.total_packages }}
+            - **Packages in Our Config:** ${('${{ steps.current.outputs.packages }}'.match(/\n/g) || []).length + 1}
+
+            ### Actions Needed
+
+            ${{ steps.check.outputs.has_updates == 'true'
+              ? '⚠️ **Some packages may need attention** - Check the workflow logs for details.'
+              : '✅ All packages are available in the Wolfi repository.' }}
+
+            ### Important Notes
+
+            - Wolfi has a package retention policy: non-latest versions older than 12 months will be removed (reducing to 3 months)
+            - Check [Wolfi Security Advisories](https://github.com/wolfi-dev/advisories) regularly
+            - Review the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for detailed information
+
+            ### Recommendations
+
+            1. Review the package status in the workflow summary
+            2. Check for any security advisories
+            3. Test the image build with current packages
+            4. Update packages if needed and rebuild
+
+            ---
+            *This issue was automatically created by the Wolfi Package Update Check workflow.*
+            `;
+
+            // Check if a recent issue exists (within last 7 days)
+            const sevenDaysAgo = new Date();
+            sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'wolfi,package-update-check',
+              since: sevenDaysAgo.toISOString()
+            });
+
+            if (issues.data.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: body,
+                labels: ['wolfi', 'package-update-check', 'maintenance']
+              });
+              console.log('Created new issue');
+            } else {
+              console.log('Recent issue exists, skipping creation');
+            }
+
+      - name: Trigger rebuild if packages are available
+        if: steps.check.outputs.has_updates == 'false' && github.event_name == 'schedule'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            console.log('All packages are available. Consider triggering a rebuild to get latest versions.');
+
+            // Optionally trigger the build workflow
+            // await github.rest.actions.createWorkflowDispatch({
+            //   owner: context.repo.owner,
+            //   repo: context.repo.repo,
+            //   workflow_id: 'wolfi-base-enhanced.yaml',
+            //   ref: 'main'
+            // });
+
+      - name: Send Slack notification
+        if: always() && vars.SLACK_WEBHOOK_URL != ''
+        uses: slackapi/slack-github-action@v1.25.0
+        with:
+          payload: |
+            {
+              "text": "📦 Wolfi Package Update Check Complete",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "📦 Wolfi Package Update Check",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Status:* ${{ steps.check.outputs.has_updates == 'true' && '⚠️ Attention needed' || '✅ All packages available' }}\n*Total Wolfi Packages:* ${{ steps.stats.outputs.total_packages }}\n*Last Check:* ${{ steps.compare.outputs.last_check }}"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Details",
+                        "emoji": true
+                      },
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Create summary
+        if: always()
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## ℹ️ Additional Information" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- [Wolfi OS GitHub](https://github.com/wolfi-dev/os)" >> $GITHUB_STEP_SUMMARY
+          echo "- [Wolfi Package Repository](https://packages.wolfi.dev/os)" >> $GITHUB_STEP_SUMMARY
+          echo "- [Chainguard Academy - Wolfi](https://edu.chainguard.dev/open-source/wolfi/overview/)" >> $GITHUB_STEP_SUMMARY
+          echo "- [apko Documentation](https://github.com/chainguard-dev/apko)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "*Check completed at: $(date -u +'%Y-%m-%d %H:%M:%S UTC')*" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,478 @@
+name: Enhanced Wolfi Base Image Build & Publish
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write # Keyless signing with cosign
+  security-events: write
+  issues: write
+
+on:
+  schedule:
+    # Monday and Thursday at 8:00 AM Eastern (13:00 UTC)
+    - cron: '0 13 * * 1,4'
+
+  push:
+    branches:
+      - main
+    paths:
+      - 'containers/wolfi-base/wolfi-direct.apko.yaml'
+      - 'containers/wolfi-base/Makefile'
+      - '.github/workflows/wolfi-base-enhanced.yaml'
+
+  pull_request:
+    paths:
+      - 'containers/wolfi-base/wolfi-direct.apko.yaml'
+      - 'containers/wolfi-base/Makefile'
+      - '.github/workflows/wolfi-base-enhanced.yaml'
+
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Custom tag for the image'
+        required: false
+        type: string
+        default: ''
+      push_enabled:
+        description: 'Push to registry'
+        required: false
+        type: boolean
+        default: true
+
+env:
+  REGISTRY: ghcr.io
+  ORG: the-mines/sbi
+  IMAGE_NAME: wolfi
+  APKO_VERSION: 'latest'
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    name: Build and Publish Wolfi Base
+    outputs:
+      image_digest: ${{ steps.publish.outputs.digest }}
+      image_ref: ${{ steps.publish.outputs.image_ref }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up environment variables
+        id: env
+        run: |
+          echo "short_sha=$(echo ${GITHUB_SHA} | cut -c1-8)" >> $GITHUB_OUTPUT
+          echo "build_date=$(date -u +'%Y%m%d')" >> $GITHUB_OUTPUT
+          echo "timestamp=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+          echo "repo_lower=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      - name: Determine if push is enabled
+        id: should_push
+        run: |
+          SHOULD_PUSH="false"
+          if [[ "${{ github.event_name }}" == "schedule" ]] || \
+             [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == "refs/heads/main" ]] || \
+             [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.push_enabled }}" == "true" ]]; then
+            SHOULD_PUSH="true"
+          fi
+          echo "push=$SHOULD_PUSH" >> $GITHUB_OUTPUT
+          echo "Push enabled: $SHOULD_PUSH"
+
+      - name: Generate image tags
+        id: tags
+        run: |
+          TAGS=""
+          BASE_IMAGE="${{ env.REGISTRY }}/${{ steps.env.outputs.repo_lower }}/${{ env.IMAGE_NAME }}"
+
+          # Always include latest
+          TAGS="${BASE_IMAGE}:latest"
+
+          # Add date tag for scheduled builds
+          if [[ "${{ github.event_name }}" == "schedule" ]]; then
+            TAGS="${TAGS},${BASE_IMAGE}:${{ steps.env.outputs.build_date }}"
+          fi
+
+          # Add commit SHA tag
+          TAGS="${TAGS},${BASE_IMAGE}:${{ steps.env.outputs.short_sha }}"
+
+          # Add custom tag if provided
+          if [[ -n "${{ inputs.tag }}" ]]; then
+            TAGS="${TAGS},${BASE_IMAGE}:${{ inputs.tag }}"
+          fi
+
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+          echo "base_image=${BASE_IMAGE}" >> $GITHUB_OUTPUT
+          echo "Generated tags: ${TAGS}"
+
+      - name: Extract package information
+        id: packages
+        run: |
+          cd containers/wolfi-base
+          echo "Extracting package list from apko config..."
+          PACKAGES=$(yq eval '.contents.packages[]' wolfi-direct.apko.yaml | tr '\n' ',' | sed 's/,$//')
+          echo "packages=${PACKAGES}" >> $GITHUB_OUTPUT
+          echo "Packages: ${PACKAGES}"
+
+      - name: Install apko
+        run: |
+          echo "Installing apko..."
+          # Install apko using the official installation method
+          curl -fsSL https://github.com/chainguard-dev/apko/releases/latest/download/apko_linux_amd64.tar.gz | \
+            sudo tar -xz -C /usr/local/bin apko
+
+          # Verify installation
+          apko version
+          echo "✅ apko installed successfully"
+
+      - name: Install yq
+        run: |
+          echo "Installing yq..."
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+          yq --version
+
+      - name: Install cosign
+        if: steps.should_push.outputs.push == 'true'
+        uses: sigstore/cosign-installer@v3
+
+      - name: Log in to GitHub Container Registry
+        if: steps.should_push.outputs.push == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish image with apko
+        id: publish
+        working-directory: containers/wolfi-base
+        run: |
+          if [[ "${{ steps.should_push.outputs.push }}" == "true" ]]; then
+            echo "🚀 Building and publishing multi-arch image..."
+
+            # Publish all tags
+            IFS=',' read -ra TAG_ARRAY <<< "${{ steps.tags.outputs.tags }}"
+            FIRST_TAG="${TAG_ARRAY[0]}"
+
+            # Publish the first tag with full options
+            apko publish wolfi-direct.apko.yaml "${FIRST_TAG}" \
+              --arch x86_64,aarch64 \
+              --sbom \
+              --sbom-formats spdx \
+              --image-refs image-refs.txt
+
+            # Get the digest from the published image
+            DIGEST=$(docker manifest inspect "${FIRST_TAG}" | jq -r '.manifests[0].digest')
+
+            # Tag other tags to the same digest
+            for tag in "${TAG_ARRAY[@]:1}"; do
+              echo "Tagging ${tag}..."
+              docker buildx imagetools create --tag "${tag}" "${FIRST_TAG}"
+            done
+
+            echo "digest=${DIGEST}" >> $GITHUB_OUTPUT
+            echo "image_ref=${FIRST_TAG}@${DIGEST}" >> $GITHUB_OUTPUT
+            echo "✅ Published successfully"
+          else
+            echo "📦 Building image (no push)..."
+            apko build wolfi-direct.apko.yaml wolfi:test wolfi-test.tar \
+              --arch x86_64,aarch64 \
+              --sbom \
+              --sbom-formats spdx
+            echo "✅ Build successful (dry run)"
+          fi
+
+      - name: Sign container image
+        if: steps.should_push.outputs.push == 'true' && steps.publish.outputs.image_ref != ''
+        run: |
+          echo "🔏 Signing container image..."
+          cosign sign --yes \
+            "${{ steps.publish.outputs.image_ref }}"
+          echo "✅ Image signed successfully"
+
+      - name: Generate SLSA provenance
+        if: steps.should_push.outputs.push == 'true' && steps.publish.outputs.image_ref != ''
+        run: |
+          echo "📋 Generating SLSA provenance..."
+          cosign attest --yes \
+            --predicate-type slsaprovenance \
+            --predicate <(echo '{
+              "buildType": "https://github.com/chainguard-dev/apko",
+              "builder": {
+                "id": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              },
+              "invocation": {
+                "configSource": {
+                  "uri": "https://github.com/${{ github.repository }}",
+                  "digest": {
+                    "sha1": "${{ github.sha }}"
+                  }
+                },
+                "parameters": {
+                  "packages": "${{ steps.packages.outputs.packages }}",
+                  "architectures": "x86_64,aarch64"
+                }
+              },
+              "metadata": {
+                "buildStartedOn": "${{ steps.env.outputs.timestamp }}",
+                "completeness": {
+                  "parameters": true,
+                  "environment": true,
+                  "materials": true
+                }
+              }
+            }') \
+            "${{ steps.publish.outputs.image_ref }}"
+          echo "✅ Provenance generated"
+
+      - name: Verify image signature
+        if: steps.should_push.outputs.push == 'true' && steps.publish.outputs.image_ref != ''
+        run: |
+          echo "🔍 Verifying image signature..."
+          cosign verify \
+            --certificate-identity-regexp "https://github.com/${{ github.repository }}/.github/workflows/.*" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "${{ steps.publish.outputs.image_ref }}" | jq .
+          echo "✅ Signature verified"
+
+      - name: Run Trivy vulnerability scanner
+        if: steps.should_push.outputs.push == 'true' && steps.publish.outputs.image_ref != ''
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.publish.outputs.image_ref }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          exit-code: '0'
+
+      - name: Upload Trivy results to GitHub Security
+        if: steps.should_push.outputs.push == 'true' && steps.publish.outputs.image_ref != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Generate Trivy table output
+        if: steps.should_push.outputs.push == 'true' && steps.publish.outputs.image_ref != ''
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.publish.outputs.image_ref }}
+          format: 'table'
+          output: 'trivy-results.txt'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+
+      - name: Extract vulnerability metrics
+        if: steps.should_push.outputs.push == 'true' && steps.publish.outputs.image_ref != ''
+        id: trivy
+        run: |
+          if [ -f "trivy-results.txt" ]; then
+            CRITICAL=$(grep -oP 'CRITICAL: \K\d+' trivy-results.txt | head -1 || echo "0")
+            HIGH=$(grep -oP 'HIGH: \K\d+' trivy-results.txt | head -1 || echo "0")
+            MEDIUM=$(grep -oP 'MEDIUM: \K\d+' trivy-results.txt | head -1 || echo "0")
+
+            echo "critical=${CRITICAL}" >> $GITHUB_OUTPUT
+            echo "high=${HIGH}" >> $GITHUB_OUTPUT
+            echo "medium=${MEDIUM}" >> $GITHUB_OUTPUT
+
+            if [ "${CRITICAL}" -gt "0" ]; then
+              echo "has_critical=true" >> $GITHUB_OUTPUT
+            else
+              echo "has_critical=false" >> $GITHUB_OUTPUT
+            fi
+
+            echo "📊 Vulnerabilities: Critical=${CRITICAL}, High=${HIGH}, Medium=${MEDIUM}"
+          else
+            echo "critical=0" >> $GITHUB_OUTPUT
+            echo "high=0" >> $GITHUB_OUTPUT
+            echo "medium=0" >> $GITHUB_OUTPUT
+            echo "has_critical=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload SBOM artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-wolfi-base-${{ steps.env.outputs.build_date }}
+          path: containers/wolfi-base/*.spdx.json
+          retention-days: 90
+
+      - name: Upload Trivy scan results
+        if: steps.should_push.outputs.push == 'true' && steps.publish.outputs.image_ref != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-results-${{ steps.env.outputs.build_date }}
+          path: trivy-results.txt
+          retention-days: 30
+
+      - name: Create detailed build summary
+        if: always()
+        run: |
+          echo "# 🐺 Wolfi Base Image Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Build Date:** ${{ steps.env.outputs.timestamp }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** [\`${{ github.sha }}\`](https://github.com/${{ github.repository }}/commit/${{ github.sha }})" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by:** \`${{ github.event_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Push Enabled:** \`${{ steps.should_push.outputs.push }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "## ✅ Build Successful" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            if [[ "${{ steps.should_push.outputs.push }}" == "true" ]]; then
+              echo "### 🏷️ Published Tags" >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+              echo "${{ steps.tags.outputs.tags }}" | tr ',' '\n' >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+
+              if [ -n "${{ steps.publish.outputs.digest }}" ]; then
+                echo "### 🔐 Image Digest" >> $GITHUB_STEP_SUMMARY
+                echo "\`${{ steps.publish.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
+                echo "" >> $GITHUB_STEP_SUMMARY
+              fi
+
+              echo "### 📦 Packages" >> $GITHUB_STEP_SUMMARY
+              echo "\`${{ steps.packages.outputs.packages }}\`" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+
+              echo "### 🛡️ Security" >> $GITHUB_STEP_SUMMARY
+              echo "- ✅ Image signed with cosign (keyless)" >> $GITHUB_STEP_SUMMARY
+              echo "- ✅ SLSA provenance attestation generated" >> $GITHUB_STEP_SUMMARY
+              echo "- ✅ SBOM generated (SPDX format)" >> $GITHUB_STEP_SUMMARY
+
+              if [ -n "${{ steps.trivy.outputs.critical }}" ]; then
+                echo "- 📊 Trivy Scan Results:" >> $GITHUB_STEP_SUMMARY
+                echo "  - Critical: **${{ steps.trivy.outputs.critical }}**" >> $GITHUB_STEP_SUMMARY
+                echo "  - High: **${{ steps.trivy.outputs.high }}**" >> $GITHUB_STEP_SUMMARY
+                echo "  - Medium: **${{ steps.trivy.outputs.medium }}**" >> $GITHUB_STEP_SUMMARY
+
+                if [[ "${{ steps.trivy.outputs.has_critical }}" == "true" ]]; then
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "⚠️ **WARNING:** Critical vulnerabilities detected!" >> $GITHUB_STEP_SUMMARY
+                fi
+              fi
+            else
+              echo "### 📦 Dry Run" >> $GITHUB_STEP_SUMMARY
+              echo "Image was built but not pushed to registry." >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "## ❌ Build Failed" >> $GITHUB_STEP_SUMMARY
+            echo "Check the workflow logs for details." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Create issue for critical vulnerabilities
+        if: steps.should_push.outputs.push == 'true' && steps.trivy.outputs.has_critical == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const title = '🚨 Critical vulnerabilities in Wolfi base image';
+            const body = `Critical vulnerabilities were found in the Wolfi base image build.
+
+            **Build Information:**
+            - Date: ${{ steps.env.outputs.timestamp }}
+            - Commit: ${{ github.sha }}
+            - Image: \`${{ steps.publish.outputs.image_ref }}\`
+
+            **Vulnerability Summary:**
+            - Critical: **${{ steps.trivy.outputs.critical }}**
+            - High: **${{ steps.trivy.outputs.high }}**
+            - Medium: **${{ steps.trivy.outputs.medium }}**
+
+            **Actions Required:**
+            1. Review the [Trivy scan results](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            2. Check if Wolfi package updates are available
+            3. Update the apko configuration if needed
+            4. Rebuild the image
+
+            **Links:**
+            - [Workflow Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            - [Security Tab](${{ github.server_url }}/${{ github.repository }}/security)
+            `;
+
+            // Check if an issue already exists
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'security,wolfi,critical-vulnerability'
+            });
+
+            if (issues.data.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: body,
+                labels: ['security', 'wolfi', 'critical-vulnerability']
+              });
+            }
+
+      - name: Send Slack notification
+        if: always() && vars.SLACK_WEBHOOK_URL != ''
+        uses: slackapi/slack-github-action@v1.25.0
+        with:
+          payload: |
+            {
+              "text": "${{ job.status == 'success' && '✅' || '❌' }} Wolfi Base Image Build ${{ job.status }}",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "${{ job.status == 'success' && '✅' || '❌' }} Wolfi Base Image Build ${{ job.status }}",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Repository:* ${{ github.repository }}\n*Branch:* ${{ github.ref_name }}\n*Commit:* ${{ steps.env.outputs.short_sha }}\n*Event:* ${{ github.event_name }}"
+                  }
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Packages:* `${{ steps.packages.outputs.packages }}`\n*Pushed:* ${{ steps.should_push.outputs.push }}"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Run",
+                        "emoji": true
+                      },
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Create failure issue
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🚨 Wolfi base image build failure',
+              body: `The Wolfi base image build has failed.
+
+              **Workflow Run:** [View Details](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+              **Commit:** ${{ github.sha }}
+              **Triggered by:** ${{ github.event_name }}
+              **Date:** ${{ steps.env.outputs.timestamp }}
+
+              Please investigate and fix the build failure.`,
+              labels: ['bug', 'ci/cd', 'wolfi', 'build-failure']
+            })
