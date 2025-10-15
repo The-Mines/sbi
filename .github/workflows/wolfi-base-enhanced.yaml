@@ -178,6 +178,7 @@ jobs:
               --arch x86_64,aarch64 \
               --sbom \
               --sbom-formats spdx \
+              --sbom-path . \
               --image-refs image-refs.txt
 
             # Get the digest from the published image
@@ -197,7 +198,8 @@ jobs:
             apko build wolfi-direct.apko.yaml wolfi:test wolfi-test.tar \
               --arch x86_64,aarch64 \
               --sbom \
-              --sbom-formats spdx
+              --sbom-formats spdx \
+              --sbom-path .
             echo "✅ Build successful (dry run)"
           fi
 
@@ -314,6 +316,7 @@ jobs:
           name: sbom-wolfi-base-${{ steps.env.outputs.build_date }}
           path: containers/wolfi-base/*.spdx.json
           retention-days: 90
+          if-no-files-found: warn
 
       - name: Upload Trivy scan results
         if: steps.should_push.outputs.push == 'true' && steps.publish.outputs.image_ref != ''
