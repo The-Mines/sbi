@@ -114,9 +114,16 @@ jobs:
       - name: Install apko
         run: |
           echo "Installing apko..."
-          # Install apko using the official installation method
-          curl -fsSL https://github.com/chainguard-dev/apko/releases/latest/download/apko_linux_amd64.tar.gz | \
-            sudo tar -xz -C /usr/local/bin apko
+          # Fetch the latest release information and extract the download URL
+          APKO_URL=$(curl -s https://api.github.com/repos/chainguard-dev/apko/releases/latest | \
+            grep "browser_download_url.*linux_amd64.tar.gz\"" | \
+            grep -v "\.sig" | \
+            grep -v "\.crt" | \
+            cut -d '"' -f 4 | \
+            head -1)
+
+          echo "Downloading apko from: $APKO_URL"
+          curl -fsSL "$APKO_URL" | sudo tar -xz -C /usr/local/bin apko
 
           # Verify installation
           apko version
