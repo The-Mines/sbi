@@ -189,9 +189,7 @@ jobs:
 
             ### Actions Needed
 
-            ${{ steps.check.outputs.has_updates == 'true'
-              ? '⚠️ **Some packages may need attention** - Check the workflow logs for details.'
-              : '✅ All packages are available in the Wolfi repository.' }}
+            ${{ steps.check.outputs.has_updates == 'true' && '⚠️ **Some packages may need attention** - Check the workflow logs for details.' || '✅ All packages are available in the Wolfi repository.' }}
 
             ### Important Notes
 
